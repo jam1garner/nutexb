@@ -1,6 +1,6 @@
 [package]
 name = "nutexb"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["jam1garner <jam1.mcleod@hotmail.com>"]
 edition = "2018"
 
@@ -13,4 +13,4 @@ path = "src/main.rs"
 [dependencies]
 nom = "5"
 ddsfile = "0.4"
-binwrite = "0.1.5"
+binwrite = "^0.1.5"
