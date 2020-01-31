@@ -3,6 +3,9 @@ name = "nutexb"
 version = "0.0.1"
 authors = ["jam1garner <jam1.mcleod@hotmail.com>"]
 edition = "2018"
+description = "Library for working with Smash Ultimate's nutexb texture files"
+license = "MIT"
+repository = "https://github.com/jam1garner/nutexb"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
