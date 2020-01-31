@@ -1,2 +1,5 @@
+*.dds
+*.nutexb
+*.bin
 /target
 Cargo.lock
