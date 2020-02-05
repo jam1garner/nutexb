@@ -43,7 +43,7 @@ fn format_to_byte(format: ddsfile::DxgiFormat) -> u8 {
     use ddsfile::DxgiFormat as Dxgi;
     match format {
         Dxgi::BC7_UNorm_sRGB => 0xe5,
-        _ => unimplemented!()
+        _ => unreachable!()
     }
 }
 
@@ -55,6 +55,11 @@ pub fn write_nutexb<W: Write, S: Into<String>>(name: S, dds: &ddsfile::Dds, writ
         width, height, depth, /*blk_width and height*/ 4, 4, 0,
         false, 16, /*tile_mode*/ 0, 4, &dds.data
     );
+
+    if dds.get_dxgi_format().unwrap() != ddsfile::DxgiFormat::BC7_UNorm_sRGB {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput))
+    }
+
     let size = data.len() as u32;
     NutexbFile {
         data,
