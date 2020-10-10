@@ -42,6 +42,7 @@ struct NutexbFooter {
 fn format_to_byte(format: ddsfile::DxgiFormat) -> u8 {
     use ddsfile::DxgiFormat as Dxgi;
     match format {
+        Dxgi::R8G8B8A8_UNorm_sRGB => 0x5,
         Dxgi::BC7_UNorm_sRGB => 0xe5,
         _ => unreachable!()
     }
@@ -71,6 +72,40 @@ pub fn write_nutexb<W: Write, S: Into<String>>(name: S, dds: &ddsfile::Dds, writ
             height,
             depth,
             image_format: dds.get_dxgi_format().unwrap(),
+            unk: 4,
+            unk2: 4,
+            mip_count: 1,
+            alignment: 0x1000,
+            array_count: 1,
+            size,
+            tex_magic: *b" XET",
+            version_stuff: (1, 2)
+        }
+    }.write(writer)
+}
+
+pub fn write_nutexb_from_png<W: Write, S: Into<String>>(name: S, img: image::DynamicImage, writer: &mut W) -> io::Result<()> {
+    let img = img.to_rgba();
+    let width = img.width();
+    let height = img.height();
+    let depth = 1;
+    let data = img.into_raw();
+    let data = super::tegra_swizzle::swizzle(
+        width, height, depth, /*blk_width and height*/ 1, 1, 1,
+        false, 4, /*tile_mode*/ 0, 4, &data
+    );
+
+    let size = data.len() as u32;
+    NutexbFile {
+        data,
+        footer: NutexbFooter {
+            mip_sizes: vec![size as u32],
+            string_magic: *b" XNT",
+            string: name.into(),
+            width,
+            height,
+            depth,
+            image_format: ddsfile::DxgiFormat::R8G8B8A8_UNorm_sRGB,
             unk: 4,
             unk2: 4,
             mip_count: 1,
