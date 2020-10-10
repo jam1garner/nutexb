@@ -1,6 +1,7 @@
 use std::convert::Into;
 use std::io::{self, prelude::*};
 use binwrite::BinWrite;
+use image::GenericImageView;
 
 pub trait ToNutexb {
     fn get_width(&self) -> u32;
@@ -11,7 +12,7 @@ pub trait ToNutexb {
     fn get_block_height(&self) -> u32;
     fn get_block_depth(&self) -> u32;
     
-    // TODO: Return a reference to avoid an extra copy?
+    // TODO: Return &[u8] to avoid an extra copy?
     fn get_image_data(&self) -> Vec<u8>;
 
     fn get_bytes_per_pixel(&self) -> u32;
@@ -24,13 +25,11 @@ pub trait ToNutexb {
 
 impl ToNutexb for image::DynamicImage {
     fn get_width(&self) -> u32 {
-        // TODO: Avoid copy?
-        self.to_rgba().width()
+        self.dimensions().0
     }
 
     fn get_height(&self) -> u32 {
-        // TODO: Avoid copy?
-        self.to_rgba().height()
+        self.dimensions().1
     }
 
     fn get_depth(&self) -> u32 {
