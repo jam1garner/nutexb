@@ -14,7 +14,7 @@ name = "nutexb"
 path = "src/main.rs"
 
 [dependencies]
-nom = "5"
 ddsfile = "0.4"
 binwrite = "^0.1.5"
 image = "0.23.10"
+binread = "1.1.1"
