@@ -1,12 +1,22 @@
-use nutexb::ddsfile::*;
-use nutexb::DdsExt;
-use std::io::Cursor;
-
 fn main() {
-    /*let mut reader = Cursor::new(&include_bytes!("def_ike_001_osan_col.dds")[..]);
-    let dds = Dds::read(&mut reader).unwrap();
-    dds.write_nutexb_to_file("def_ike_001_osan_col.nutexb").unwrap();
-    let mut reader = Cursor::new(&include_bytes!("ike.dds")[..]);
-    let dds = Dds::read(&mut reader).unwrap();
-    std::fs::write("ike_layer_data.dds", &dds.data).unwrap();*/
+    // TODO: Print usage and add better argument handling.
+    let args: Vec<String> = std::env::args().collect();
+    let input_image_path = std::path::Path::new(&args[1]);
+    let output_nutex_path = std::path::Path::new(&args[2]);
+
+    // TODO: Add meaningful error messages.
+    let mut output_file = std::fs::File::create(output_nutex_path).unwrap();
+
+    // TODO: In the future, this could return something implementing ToNutexb and then simply call image.ToNutextb(...).
+    match input_image_path.extension().unwrap().to_str().unwrap() {
+        "dds" => {
+            let mut reader = std::fs::File::open(input_image_path).unwrap();
+            let dds = nutexb::ddsfile::Dds::read(&mut reader).unwrap();
+            nutexb::writer::write_nutexb("TODO", &dds, &mut output_file).unwrap();
+        },
+        _ => {
+            let image = image::open(input_image_path).unwrap();
+            nutexb::writer::write_nutexb_from_png("TODO", image, &mut output_file).unwrap();
+        }
+    }
 }
