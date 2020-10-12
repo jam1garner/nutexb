@@ -1,6 +1,6 @@
+use binread::io::SeekFrom;
 use binread::prelude::*;
 use binread::NullString;
-use binread::io::SeekFrom;
 
 #[derive(BinRead, Debug, Clone)]
 pub struct NutexbFile {
@@ -15,7 +15,6 @@ pub struct NutexbFile {
 #[br(magic = b" XET")]
 pub struct NutexbFooter {
     pub version: (u16, u16),
-    
 
     #[br(seek_before = { dbg!("test");SeekFrom::End(-0x2C) })]
     pub width: u32,
@@ -43,7 +42,7 @@ pub struct NutexbFooter {
 
 #[derive(Debug, Clone, Copy)]
 pub enum NutexbFormat {
-    Unknown(u8)
+    Unknown(u8),
 }
 
 impl From<u8> for NutexbFormat {

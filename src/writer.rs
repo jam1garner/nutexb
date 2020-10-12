@@ -1,7 +1,7 @@
-use std::convert::Into;
-use std::io::{self, prelude::*};
 use binwrite::BinWrite;
 use image::GenericImageView;
+use std::convert::Into;
+use std::io::{self, prelude::*};
 
 pub trait ToNutexb {
     fn get_width(&self) -> u32;
@@ -11,7 +11,7 @@ pub trait ToNutexb {
     fn get_block_width(&self) -> u32;
     fn get_block_height(&self) -> u32;
     fn get_block_depth(&self) -> u32;
-    
+
     // TODO: Return &[u8] to avoid an extra copy?
     fn get_image_data(&self) -> Vec<u8>;
 
@@ -49,7 +49,7 @@ impl ToNutexb for image::DynamicImage {
     fn get_block_depth(&self) -> u32 {
         1
     }
-    
+
     fn get_image_data(&self) -> Vec<u8> {
         self.to_rgba().into_raw()
     }
@@ -65,7 +65,6 @@ impl ToNutexb for image::DynamicImage {
         ddsfile::DxgiFormat::R8G8B8A8_UNorm_sRGB
     }
 }
-
 
 impl ToNutexb for ddsfile::Dds {
     fn get_width(&self) -> u32 {
@@ -93,7 +92,7 @@ impl ToNutexb for ddsfile::Dds {
     fn get_block_depth(&self) -> u32 {
         0
     }
-    
+
     fn get_image_data(&self) -> Vec<u8> {
         // TODO: Avoid the copy.
         self.data.clone()
@@ -120,7 +119,7 @@ impl ToNutexb for ddsfile::Dds {
 #[derive(BinWrite)]
 struct NutexbFile {
     data: Vec<u8>,
-    footer: NutexbFooter
+    footer: NutexbFooter,
 }
 
 #[derive(BinWrite)]
@@ -149,7 +148,7 @@ struct NutexbFooter {
     alignment: u32,
     array_count: u32,
     size: u32,
-    
+
     tex_magic: [u8; 4],
     version_stuff: (u16, u16),
 }
@@ -159,11 +158,15 @@ fn format_to_byte(format: ddsfile::DxgiFormat) -> u8 {
     match format {
         Dxgi::R8G8B8A8_UNorm_sRGB => 0x5,
         Dxgi::BC7_UNorm_sRGB => 0xe5,
-        _ => unreachable!()
+        _ => unreachable!(),
     }
 }
 
-pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(name: S, image: &N, writer: &mut W) -> io::Result<()> {
+pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
+    name: S,
+    image: &N,
+    writer: &mut W,
+) -> io::Result<()> {
     let width = image.get_width();
     let height = image.get_height();
     let depth = image.get_depth();
@@ -175,8 +178,17 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(name: S, image: &N, 
     let bpp = image.get_bytes_per_pixel();
 
     let data = super::tegra_swizzle::swizzle(
-        width, height, depth, /*blk_width and height*/ block_width, block_height, block_depth,
-        false, bpp, /*tile_mode*/ 0, 4, &image.get_image_data()
+        width,
+        height,
+        depth,
+        /*blk_width and height*/ block_width,
+        block_height,
+        block_depth,
+        false,
+        bpp,
+        /*tile_mode*/ 0,
+        4,
+        &image.get_image_data(),
     );
 
     let size = data.len() as u32;
@@ -197,7 +209,8 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(name: S, image: &N, 
             array_count: 1,
             size,
             tex_magic: *b" XET",
-            version_stuff: (1, 2)
-        }
-    }.write(writer)
+            version_stuff: (1, 2),
+        },
+    }
+    .write(writer)
 }

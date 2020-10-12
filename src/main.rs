@@ -13,7 +13,7 @@ fn main() {
             let mut reader = std::fs::File::open(input_image_path).unwrap();
             let dds = nutexb::ddsfile::Dds::read(&mut reader).unwrap();
             nutexb::writer::write_nutexb(output_name, &dds, &mut output_file).unwrap();
-        },
+        }
         _ => {
             let image = image::open(input_image_path).unwrap();
             nutexb::writer::write_nutexb(output_name, &image, &mut output_file).unwrap();

@@ -1,8 +1,7 @@
-pub mod writer;
 pub mod parser;
 pub mod tegra_swizzle;
+pub mod writer;
 
-use std::io::{prelude::*, self};
-use std::path::Path;
 pub use ddsfile;
-
+use std::io::{self, prelude::*};
+use std::path::Path;
