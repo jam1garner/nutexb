@@ -16,7 +16,7 @@ pub struct NutexbFile {
 pub struct NutexbFooter {
     pub version: (u16, u16),
 
-    #[br(seek_before = { dbg!("test");SeekFrom::End(-0x2C) })]
+    #[br(seek_before = SeekFrom::End(-0x2C))]
     pub width: u32,
     pub height: u32,
     pub depth: u32,
@@ -38,6 +38,12 @@ pub struct NutexbFooter {
 
     #[br(seek_before = SeekFrom::End(-0x70), magic = b" XNT", map = NullString::into_string)]
     pub string: String,
+}
+
+pub fn read_nutexb(path: &std::path::Path) -> Result<NutexbFile, Box<dyn std::error::Error>> {
+    let mut file = std::io::Cursor::new(std::fs::read(path)?);
+    let nutexb = file.read_le::<NutexbFile>()?;
+    Ok(nutexb)
 }
 
 #[derive(Debug, Clone, Copy)]
