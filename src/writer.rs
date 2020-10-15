@@ -187,7 +187,7 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
         false,
         bpp,
         /*tile_mode*/ 0,
-        4,
+        if width <= 64 && height <= 64 { 3 } else { 4 },
         &image.get_image_data(),
     );
 
