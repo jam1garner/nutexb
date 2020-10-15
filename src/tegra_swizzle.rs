@@ -93,7 +93,7 @@ fn _swizzle(
         surf_size = pitch * round_up(height, block_height * 8);
     }
 
-    let mut result = vec![0u8; surf_size as usize];
+    let mut result = vec![0xFFu8; surf_size as usize];
 
     for y in 0..height {
         for x in 0..width {
