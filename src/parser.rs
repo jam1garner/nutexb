@@ -2,6 +2,8 @@ use binread::io::SeekFrom;
 use binread::prelude::*;
 use binread::NullString;
 
+use binread::BinResult;
+
 #[derive(BinRead, Debug, Clone)]
 pub struct NutexbFile {
     #[br(seek_before = SeekFrom::End(-8))]
@@ -62,6 +64,14 @@ impl From<u8> for NutexbFormat {
 fn to_nutexb_format(num: u8) -> ddsfile::DxgiFormat {
     match num {
         _ => ddsfile::DxgiFormat::Unknown,
+    }
+}
+
+use std::io::{Read, Seek};
+
+impl NutexbFile {
+    pub fn parse<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        reader.read_le::<NutexbFile>()
     }
 }
 
