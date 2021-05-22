@@ -1,8 +1,10 @@
+use crate::NutexbFormat;
+use binread::helpers::read_bytes;
 use binread::io::SeekFrom;
 use binread::prelude::*;
-use binread::NullString;
-use binread::helpers::read_bytes;
 use binread::BinResult;
+use binread::NullString;
+use std::io::{Read, Seek};
 
 #[derive(BinRead, Debug, Clone)]
 pub struct NutexbFile {
@@ -24,13 +26,12 @@ pub struct NutexbFooter {
     pub width: u32,
     pub height: u32,
     pub depth: u32,
-    
-    #[br(map = u8::into)]
+
     pub image_format: NutexbFormat,
-    
+
     #[br(pad_after = 0x2)]
     pub unk: u8, // 4?
-    
+
     pub unk2: u32,
     pub mip_count: u32,
     pub alignment: u32,
@@ -49,27 +50,6 @@ pub fn read_nutexb(path: &std::path::Path) -> Result<NutexbFile, Box<dyn std::er
     let nutexb = file.read_le::<NutexbFile>()?;
     Ok(nutexb)
 }
-
-#[derive(Debug, Clone, Copy)]
-pub enum NutexbFormat {
-    Unknown(u8),
-}
-
-impl From<u8> for NutexbFormat {
-    fn from(num: u8) -> Self {
-        match num {
-            _ => NutexbFormat::Unknown(num),
-        }
-    }
-}
-
-fn to_nutexb_format(num: u8) -> ddsfile::DxgiFormat {
-    match num {
-        _ => ddsfile::DxgiFormat::Unknown,
-    }
-}
-
-use std::io::{Read, Seek};
 
 impl NutexbFile {
     pub fn parse<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {

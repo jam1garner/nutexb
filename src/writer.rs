@@ -1,7 +1,12 @@
 use binwrite::BinWrite;
 use image::GenericImageView;
-use std::convert::Into;
-use std::io::{self, prelude::*};
+use std::io::prelude::*;
+use std::{
+    convert::{Into, TryFrom, TryInto},
+    error::Error,
+};
+
+use crate::NutexbFormat;
 
 pub trait ToNutexb {
     fn get_width(&self) -> u32;
@@ -12,15 +17,11 @@ pub trait ToNutexb {
     fn get_block_height(&self) -> u32;
     fn get_block_depth(&self) -> u32;
 
-    // TODO: Return &[u8] to avoid an extra copy?
     fn get_image_data(&self) -> Vec<u8>;
 
     fn get_bytes_per_pixel(&self) -> u32;
 
-    // TODO: This should just use a Nutexb enum to avoid forcing dds as a dependency.
-    // TODO: This function should probably return an error if the format can't be converted.
-    // TODO: Have the format implement std::from for the Nutexb enum.
-    fn get_image_format(&self) -> ddsfile::DxgiFormat;
+    fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
 }
 
 impl ToNutexb for image::DynamicImage {
@@ -51,18 +52,15 @@ impl ToNutexb for image::DynamicImage {
     }
 
     fn get_image_data(&self) -> Vec<u8> {
-        self.to_rgba().into_raw()
+        self.to_rgba8().into_raw()
     }
 
     fn get_bytes_per_pixel(&self) -> u32 {
         4 // RGBA
     }
 
-    // TODO: This should just use a Nutexb enum to avoid forcing dds as a dependency.
-    // TODO: This function should probably return an error if the format can't be converted.
-    // TODO: Have the format implement std::from for the Nutexb enum.
-    fn get_image_format(&self) -> ddsfile::DxgiFormat {
-        ddsfile::DxgiFormat::R8G8B8A8_UNorm_sRGB
+    fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
+        Ok(NutexbFormat::R8G8B8A8Srgb)
     }
 }
 
@@ -94,25 +92,20 @@ impl ToNutexb for ddsfile::Dds {
     }
 
     fn get_image_data(&self) -> Vec<u8> {
-        // TODO: Avoid the copy.
         self.data.clone()
     }
 
     fn get_bytes_per_pixel(&self) -> u32 {
-        16 // RGBA
+        // TODO: Support other formats.
+        16
     }
 
     // TODO: This should just use a Nutexb enum to avoid forcing dds as a dependency.
     // TODO: This function should probably return an error if the format can't be converted.
     // TODO: Have the format implement std::from for the Nutexb enum.
-    fn get_image_format(&self) -> ddsfile::DxgiFormat {
-        let format = self.get_dxgi_format().unwrap();
-        if format != ddsfile::DxgiFormat::BC7_UNorm_sRGB {
-            // TODO: return a result instead.
-            panic!("{:?}", format);
-        } else {
-            format
-        }
+    fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
+        let format = self.get_dxgi_format().unwrap().try_into()?;
+        Ok(format)
     }
 }
 
@@ -138,7 +131,7 @@ struct NutexbFooter {
     depth: u32,
 
     #[binwrite(preprocessor(format_to_byte))]
-    image_format: ddsfile::DxgiFormat,
+    image_format: NutexbFormat,
 
     #[binwrite(pad_after(0x2))]
     unk: u8, // 4?
@@ -153,12 +146,35 @@ struct NutexbFooter {
     version_stuff: (u16, u16),
 }
 
-fn format_to_byte(format: ddsfile::DxgiFormat) -> u8 {
-    use ddsfile::DxgiFormat as Dxgi;
-    match format {
-        Dxgi::R8G8B8A8_UNorm_sRGB => 0x5,
-        Dxgi::BC7_UNorm_sRGB => 0xe5,
-        _ => unreachable!(),
+fn format_to_byte(format: NutexbFormat) -> u8 {
+    format as u8
+}
+
+impl TryFrom<ddsfile::DxgiFormat> for NutexbFormat {
+    type Error = String;
+
+    fn try_from(value: ddsfile::DxgiFormat) -> Result<Self, Self::Error> {
+        // TODO: There are probably other DDS formats compatible with Nutexb.
+        match value {
+            ddsfile::DxgiFormat::R8G8B8A8_UNorm => Ok(NutexbFormat::R8G8B8A8Unorm),
+            ddsfile::DxgiFormat::R8G8B8A8_UNorm_sRGB => Ok(NutexbFormat::R8G8B8A8Srgb),
+            ddsfile::DxgiFormat::BC1_UNorm => Ok(NutexbFormat::BC1Unorm),
+            ddsfile::DxgiFormat::BC1_UNorm_sRGB => Ok(NutexbFormat::BC1Srgb),
+            ddsfile::DxgiFormat::BC2_UNorm => Ok(NutexbFormat::BC2Unorm),
+            ddsfile::DxgiFormat::BC2_UNorm_sRGB => Ok(NutexbFormat::BC2Srgb),
+            ddsfile::DxgiFormat::BC3_UNorm => Ok(NutexbFormat::BC3Unorm),
+            ddsfile::DxgiFormat::BC3_UNorm_sRGB => Ok(NutexbFormat::BC3Srgb),
+            ddsfile::DxgiFormat::BC4_UNorm => Ok(NutexbFormat::BC4Unorm),
+            ddsfile::DxgiFormat::BC4_SNorm => Ok(NutexbFormat::BC4Snorm),
+            ddsfile::DxgiFormat::BC5_UNorm => Ok(NutexbFormat::BC5Unorm),
+            ddsfile::DxgiFormat::BC5_SNorm => Ok(NutexbFormat::BC5Snorm),
+            ddsfile::DxgiFormat::BC7_UNorm => Ok(NutexbFormat::BC7Unorm),
+            ddsfile::DxgiFormat::BC7_UNorm_sRGB => Ok(NutexbFormat::BC7Srgb),
+            _ => Err(format!(
+                "{:?} is not a supported Nutexb image format.",
+                value
+            )),
+        }
     }
 }
 
@@ -166,7 +182,7 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
     name: S,
     image: &N,
     writer: &mut W,
-) -> io::Result<()> {
+) -> Result<(), Box<dyn Error>> {
     let width = image.get_width();
     let height = image.get_height();
     let depth = image.get_depth();
@@ -201,7 +217,7 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
             width,
             height,
             depth,
-            image_format: image.get_image_format(),
+            image_format: image.try_get_image_format()?,
             unk: 4,
             unk2: 4,
             mip_count: 1,
@@ -212,5 +228,6 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
             version_stuff: (1, 2),
         },
     }
-    .write(writer)
+    .write(writer)?;
+    Ok(())
 }
