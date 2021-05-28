@@ -231,3 +231,57 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
     .write(writer)?;
     Ok(())
 }
+
+pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
+    name: S,
+    image: &N,
+    writer: &mut W,
+) -> Result<(), Box<dyn Error>> {
+    let width = image.get_width();
+    let height = image.get_height();
+    let depth = image.get_depth();
+
+    let block_width = image.get_block_width();
+    let block_height = image.get_block_height();
+    let block_depth = image.get_block_depth();
+
+    let bpp = image.get_bytes_per_pixel();
+
+    let data = super::tegra_swizzle::swizzle(
+        width,
+        height,
+        depth,
+        /*blk_width and height*/ block_width,
+        block_height,
+        block_depth,
+        false,
+        bpp,
+        /*tile_mode*/ 0,
+        if width <= 64 && height <= 64 { 3 } else { 4 },
+        &image.get_image_data(),
+    );
+
+    let size = data.len() as u32;
+    NutexbFile {
+        data,
+        footer: NutexbFooter {
+            mip_sizes: vec![size as u32],
+            string_magic: *b" XNT",
+            string: name.into(),
+            width,
+            height,
+            depth,
+            image_format: image.try_get_image_format()?,
+            unk: 4,
+            unk2: 2,
+            mip_count: 1,
+            alignment: 0,
+            array_count: 1,
+            size,
+            tex_magic: *b" XET",
+            version_stuff: (2, 0),
+        },
+    }
+    .write(writer)?;
+    Ok(())
+}
