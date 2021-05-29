@@ -241,25 +241,7 @@ pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
     let height = image.get_height();
     let depth = image.get_depth();
 
-    let block_width = image.get_block_width();
-    let block_height = image.get_block_height();
-    let block_depth = image.get_block_depth();
-
-    let bpp = image.get_bytes_per_pixel();
-
-    let data = super::tegra_swizzle::swizzle(
-        width,
-        height,
-        depth,
-        /*blk_width and height*/ block_width,
-        block_height,
-        block_depth,
-        false,
-        bpp,
-        /*tile_mode*/ 0,
-        if width <= 64 && height <= 64 { 3 } else { 4 },
-        &image.get_image_data(),
-    );
+    let data = image.get_image_data();
 
     let size = data.len() as u32;
     NutexbFile {
@@ -282,6 +264,5 @@ pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
             version_stuff: (2, 0),
         },
     }
-    .write(writer)?;
-    Ok(())
+    .write(writer).map_err(Into::into)
 }
