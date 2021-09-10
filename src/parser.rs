@@ -45,7 +45,8 @@ pub struct NutexbFooter {
     pub mip_sizes: Vec<u32>,
 }
 
-pub fn read_nutexb(path: &std::path::Path) -> Result<NutexbFile, Box<dyn std::error::Error>> {
+/// Reads the nutexb from the specified `path`. The entire file is buffered to improve performance.
+pub fn read_nutexb<P: AsRef<std::path::Path>>(path: P) -> Result<NutexbFile, Box<dyn std::error::Error>> {
     let mut file = std::io::Cursor::new(std::fs::read(path)?);
     let nutexb = file.read_le::<NutexbFile>()?;
     Ok(nutexb)
