@@ -100,9 +100,6 @@ impl ToNutexb for ddsfile::Dds {
         16
     }
 
-    // TODO: This should just use a Nutexb enum to avoid forcing dds as a dependency.
-    // TODO: This function should probably return an error if the format can't be converted.
-    // TODO: Have the format implement std::from for the Nutexb enum.
     fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
         let format = self.get_dxgi_format().unwrap().try_into()?;
         Ok(format)
