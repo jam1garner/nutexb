@@ -26,12 +26,7 @@ pub struct NutexbFooter {
     pub width: u32,
     pub height: u32,
     pub depth: u32,
-
     pub image_format: NutexbFormat,
-
-    #[br(pad_after = 0x2)]
-    pub unk: u8, // 4?
-
     pub unk2: u32,
     pub mip_count: u32,
     pub alignment: u32,

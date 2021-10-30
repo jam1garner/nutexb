@@ -127,11 +127,8 @@ struct NutexbFooter {
     height: u32,
     depth: u32,
 
-    #[binwrite(preprocessor(format_to_byte))]
+    #[binwrite(preprocessor(format_to_u32))]
     image_format: NutexbFormat,
-
-    #[binwrite(pad_after(0x2))]
-    unk: u8, // 4?
 
     unk2: u32,
     mip_count: u32,
@@ -143,8 +140,8 @@ struct NutexbFooter {
     version_stuff: (u16, u16),
 }
 
-fn format_to_byte(format: NutexbFormat) -> u8 {
-    format as u8
+fn format_to_u32(format: NutexbFormat) -> u32 {
+    format as u32
 }
 
 impl TryFrom<ddsfile::DxgiFormat> for NutexbFormat {
@@ -215,7 +212,6 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
             height,
             depth,
             image_format: image.try_get_image_format()?,
-            unk: 4,
             unk2: 4,
             mip_count: 1,
             alignment: 0x1000,
@@ -251,7 +247,6 @@ pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
             height,
             depth,
             image_format: image.try_get_image_format()?,
-            unk: 4,
             unk2: 2,
             mip_count: 1,
             alignment: 0,
