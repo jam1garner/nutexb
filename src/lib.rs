@@ -38,6 +38,7 @@ impl NutexbFormat {
     /// For block compressed formats like [NutexbFormat::BC7Srgb], this is the size in bytes of a single block.
     /**
     ```rust
+    assert_eq!(1, NutexbFormat::R8Unorm.size_in_bytes());
     assert_eq!(4, NutexbFormat::R8G8B8A8Unorm.size_in_bytes());
     assert_eq!(8, NutexbFormat::BC1Unorm.size_in_bytes());
     assert_eq!(16, NutexbFormat::BC7Unorm.size_in_bytes());
@@ -58,6 +59,7 @@ impl NutexbFormat {
             NutexbFormat::BC5Unorm | NutexbFormat::BC5Snorm => 16,
             NutexbFormat::BC6Ufloat | NutexbFormat::BC6Sfloat => 16,
             NutexbFormat::BC7Unorm | NutexbFormat::BC7Srgb => 16,
+            NutexbFormat::R8Unorm => 1
         }
     }
 }
