@@ -1,5 +1,4 @@
 pub mod parser;
-pub mod tegra_swizzle;
 pub mod writer;
 use binread::prelude::*;
 

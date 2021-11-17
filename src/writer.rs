@@ -5,6 +5,7 @@ use std::{
     convert::{Into, TryFrom, TryInto},
     error::Error,
 };
+use tegra_swizzle::{div_round_up, block_height_mip0, swizzle_block_linear};
 
 use crate::NutexbFormat;
 
@@ -185,21 +186,17 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
     let block_height = image.get_block_height();
     let block_depth = image.get_block_depth();
 
-    let bpp = image.get_bytes_per_pixel();
+    let bytes_per_pixel = image.get_bytes_per_pixel();
 
-    let data = super::tegra_swizzle::swizzle(
-        width,
-        height,
-        depth,
-        /*blk_width and height*/ block_width,
-        block_height,
-        block_depth,
-        false,
-        bpp,
-        /*tile_mode*/ 0,
-        if width <= 64 && height <= 64 { 3 } else { 4 },
+    let block_height_mip0 = block_height_mip0(height as usize);
+    let data = swizzle_block_linear(
+        div_round_up(width as usize, block_width as usize),
+        div_round_up(height as usize, block_height as usize),
+        div_round_up(depth as usize, block_depth as usize),
         &image.get_image_data(),
-    );
+        block_height_mip0,
+        bytes_per_pixel as usize,
+    ).unwrap();
 
     let size = data.len() as u32;
     NutexbFile {
@@ -256,5 +253,6 @@ pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
             version_stuff: (2, 0),
         },
     }
-    .write(writer).map_err(Into::into)
+    .write(writer)
+    .map_err(Into::into)
 }

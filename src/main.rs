@@ -6,7 +6,8 @@ fn main() {
 
     // TODO: Add meaningful error messages.
     let output_name = output_nutex_path.file_name().unwrap().to_str().unwrap();
-    let mut output_file = std::fs::File::create(output_nutex_path).unwrap();
+    let output_file = std::fs::File::create(output_nutex_path).unwrap();
+    let mut output_file = std::io::BufWriter::new(output_file);
 
     match input_image_path.extension().unwrap().to_str().unwrap() {
         "dds" => {
