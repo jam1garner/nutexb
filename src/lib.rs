@@ -28,11 +28,11 @@ pub struct NutexbFile {
 #[brw(magic = b" XNT")]
 pub struct NutexbFooter {
     // TODO: Make this field "name: String"
+    // TODO: Names can be at most 63 characters + 1 null byte?
     /// The name of the texture, which usually matches the file name without its extension like `"def_001_col"`.
-    #[brw(align_after = 0x40)]
+    #[brw(pad_size_to = 0x40)]
     pub string: NullString,
     /// The width of the texture in pixels.
-    #[brw(pad_before = 4)]
     pub width: u32,
     /// The height of the texture in pixels.
     pub height: u32,
@@ -43,7 +43,7 @@ pub struct NutexbFooter {
     pub unk2: u32,
     /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
     pub mip_count: u32,
-    pub alignment: u32, // TODO: Fix this name
+    pub alignment: u32, // TODO: Fix this field name
     /// The number of texture arrays in [data](struct.NutexbFile.html#structfield.data). This is 6 for cubemaps and 1 otherwise.
     pub array_count: u32,
     /// The size in bytes of [data](struct.NutexbFile.html#structfield.data).
