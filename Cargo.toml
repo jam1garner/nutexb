@@ -13,7 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 ddsfile = "0.4"
-binwrite = "^0.1.5"
 image = "0.23.10"
-binread = "2.1.1"
 tegra_swizzle = "0.1.0"
+binrw = "0.8.4"

@@ -1,14 +1,56 @@
 pub mod parser;
 pub mod writer;
-use binread::prelude::*;
+use binrw::{prelude::*, NullString, ReadOptions};
+use std::io::{Read, Seek, SeekFrom};
 
+// TODO: Make dds optional.
 pub use ddsfile;
+
+// TODO: Alignment requirements for the data or file length?
+#[derive(BinRead, BinWrite, Debug, Clone)]
+pub struct NutexbFile {
+    // Use a custom parser since we don't know the length yet.
+    #[br(parse_with = until_footer)]
+    pub data: Vec<u8>,
+
+    // Add padding on write to fill in mip sizes later.
+    // TODO: Does nutexb support more than 16 mips (0x40 bytes)?
+    #[br(seek_before = SeekFrom::End(-112))]
+    #[bw(pad_before = 0x40)]
+    pub footer: NutexbFooter,
+}
+
+#[derive(BinRead, BinWrite, Debug, Clone)]
+#[brw(magic = b" XNT")]
+pub struct NutexbFooter {
+    // TODO: Make this field "name: String"
+    #[brw(align_after = 0x40)]
+    pub string: NullString,
+
+    #[brw(pad_before = 4)]
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+    pub image_format: NutexbFormat,
+    pub unk2: u32,
+    pub mip_count: u32,
+    pub alignment: u32,
+    pub array_count: u32,
+    pub size: u32,
+
+    #[brw(magic = b" XET")]
+    pub version: (u16, u16),
+
+    #[brw(seek_before = SeekFrom::End(-176))]
+    #[br(count = mip_count)]
+    pub mip_sizes: Vec<u32>,
+}
 
 // TODO: It's possible this is some sort of flags.
 // num channels, format, type (srgb, unorm, etc)?
 // TODO: Add these as methods?
-#[derive(Debug, Clone, Copy, PartialEq, BinRead)]
-#[br(repr(u32))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BinRead, BinWrite)]
+#[brw(repr(u32))]
 pub enum NutexbFormat {
     R8Unorm = 0x0100,
     R8G8B8A8Unorm = 0x0400,
@@ -58,7 +100,18 @@ impl NutexbFormat {
             NutexbFormat::BC5Unorm | NutexbFormat::BC5Snorm => 16,
             NutexbFormat::BC6Ufloat | NutexbFormat::BC6Sfloat => 16,
             NutexbFormat::BC7Unorm | NutexbFormat::BC7Srgb => 16,
-            NutexbFormat::R8Unorm => 1
+            NutexbFormat::R8Unorm => 1,
         }
     }
+}
+
+fn until_footer<R: Read + Seek>(reader: &mut R, _: &ReadOptions, _: ()) -> BinResult<Vec<u8>> {
+    // Assume the footer has a fixed size.
+    // Smash Ultimate doesn't require the footer to correctly report the image size.
+    let footer_start = reader.seek(SeekFrom::End(-176))?;
+    reader.seek(SeekFrom::Start(0))?;
+
+    let mut data = vec![0u8; footer_start as usize];
+    reader.read_exact(&mut data)?;
+    Ok(data)
 }

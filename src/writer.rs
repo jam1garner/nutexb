@@ -1,4 +1,4 @@
-use binwrite::BinWrite;
+use binrw::{prelude::*, NullString};
 use image::GenericImageView;
 use std::io::prelude::*;
 use std::{
@@ -7,7 +7,7 @@ use std::{
 };
 use tegra_swizzle::{div_round_up, block_height_mip0, swizzle_block_linear};
 
-use crate::NutexbFormat;
+use crate::{NutexbFormat, NutexbFile, NutexbFooter};
 
 pub trait ToNutexb {
     fn get_width(&self) -> u32;
@@ -107,44 +107,6 @@ impl ToNutexb for ddsfile::Dds {
     }
 }
 
-#[derive(BinWrite)]
-struct NutexbFile {
-    data: Vec<u8>,
-    footer: NutexbFooter,
-}
-
-#[derive(BinWrite)]
-struct NutexbFooter {
-    #[binwrite(align_after(0x40))]
-    mip_sizes: Vec<u32>,
-
-    string_magic: [u8; 4],
-
-    #[binwrite(align_after(0x40))]
-    string: String,
-
-    #[binwrite(pad(4))]
-    width: u32,
-    height: u32,
-    depth: u32,
-
-    #[binwrite(preprocessor(format_to_u32))]
-    image_format: NutexbFormat,
-
-    unk2: u32,
-    mip_count: u32,
-    alignment: u32,
-    array_count: u32,
-    size: u32,
-
-    tex_magic: [u8; 4],
-    version_stuff: (u16, u16),
-}
-
-fn format_to_u32(format: NutexbFormat) -> u32 {
-    format as u32
-}
-
 impl TryFrom<ddsfile::DxgiFormat> for NutexbFormat {
     type Error = String;
 
@@ -173,7 +135,7 @@ impl TryFrom<ddsfile::DxgiFormat> for NutexbFormat {
     }
 }
 
-pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
+pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     name: S,
     image: &N,
     writer: &mut W,
@@ -203,8 +165,7 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
         data,
         footer: NutexbFooter {
             mip_sizes: vec![size as u32],
-            string_magic: *b" XNT",
-            string: name.into(),
+            string: NullString::from_string(name.into()),
             width,
             height,
             depth,
@@ -214,15 +175,14 @@ pub fn write_nutexb<W: Write, S: Into<String>, N: ToNutexb>(
             alignment: 0x1000,
             array_count: 1,
             size,
-            tex_magic: *b" XET",
-            version_stuff: (1, 2),
+            version: (1, 2),
         },
     }
-    .write(writer)?;
+    .write_to(writer)?;
     Ok(())
 }
 
-pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
+pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     name: S,
     image: &N,
     writer: &mut W,
@@ -238,8 +198,7 @@ pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
         data,
         footer: NutexbFooter {
             mip_sizes: vec![size as u32],
-            string_magic: *b" XNT",
-            string: name.into(),
+            string: NullString::from_string(name.into()),
             width,
             height,
             depth,
@@ -249,10 +208,9 @@ pub fn write_nutexb_unswizzled<W: Write, S: Into<String>, N: ToNutexb>(
             alignment: 0,
             array_count: 1,
             size,
-            tex_magic: *b" XET",
-            version_stuff: (2, 0),
+            version: (2, 0),
         },
     }
-    .write(writer)
+    .write_to(writer)
     .map_err(Into::into)
 }
