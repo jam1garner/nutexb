@@ -6,13 +6,16 @@ use std::io::{Read, Seek, SeekFrom};
 // TODO: Make dds optional.
 pub use ddsfile;
 
+/// The data stored in a nutexb file like `"def_001_col.nutexb"`.
 // TODO: Alignment requirements for the data or file length?
 #[derive(BinRead, BinWrite, Debug, Clone)]
 pub struct NutexbFile {
+    /// Combined image data for all array and mipmap levels.
     // Use a custom parser since we don't know the length yet.
     #[br(parse_with = until_footer)]
     pub data: Vec<u8>,
 
+    /// Information about the image stored in [data](#structfield.data).
     // Add padding on write to fill in mip sizes later.
     // TODO: Does nutexb support more than 16 mips (0x40 bytes)?
     #[br(seek_before = SeekFrom::End(-112))]
@@ -20,32 +23,53 @@ pub struct NutexbFile {
     pub footer: NutexbFooter,
 }
 
+/// Information about the image data.
 #[derive(BinRead, BinWrite, Debug, Clone)]
 #[brw(magic = b" XNT")]
 pub struct NutexbFooter {
     // TODO: Make this field "name: String"
+    /// The name of the texture, which usually matches the file name without its extension like `"def_001_col"`.
     #[brw(align_after = 0x40)]
     pub string: NullString,
-
+    /// The width of the texture in pixels.
     #[brw(pad_before = 4)]
     pub width: u32,
+    /// The height of the texture in pixels.
     pub height: u32,
+    /// The depth of the texture in pixels or 1 for 2D textures.
     pub depth: u32,
+    /// The format of [data](struct.NutexbFile.html#structfield.data).
     pub image_format: NutexbFormat,
     pub unk2: u32,
+    /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
     pub mip_count: u32,
-    pub alignment: u32,
+    pub alignment: u32, // TODO: Fix this name
+    /// The number of texture arrays in [data](struct.NutexbFile.html#structfield.data). This is 6 for cubemaps and 1 otherwise.
     pub array_count: u32,
-    pub size: u32,
-
+    /// The size in bytes of [data](struct.NutexbFile.html#structfield.data).
+    pub data_size: u32,
     #[brw(magic = b" XET")]
     pub version: (u16, u16),
 
+    /// The size in bytes of the deswizzled data for each mipmap.
+    /// 
+    /// Most nutexb files use swizzled image data, 
+    /// so these sizes won't add up to the length of [data](struct.NutexbFile.html#structfield.data).
     #[brw(seek_before = SeekFrom::End(-176))]
     #[br(count = mip_count)]
     pub mip_sizes: Vec<u32>,
 }
 
+/// Supported image data formats.
+/// 
+/// These formats have a corresponding format in modern versions of graphics APIs like OpenGL, Vulkan, etc.
+/// Most of the compressed formats are supported by [Dds](ddsfile::Dds).
+/// 
+/// In some contexts, "Unorm" is called "linear" or expanded to "unsigned normalized".
+/// "U" and "S" prefixes refer to "unsigned" and "signed" data, respectively.
+/// 
+/// Variants with "Srgb" store identical data as "Unorm" variants but signal to the graphics API to 
+/// convert from sRGB to linear gamma when accessing texture data. 
 // TODO: It's possible this is some sort of flags.
 // num channels, format, type (srgb, unorm, etc)?
 // TODO: Add these as methods?
