@@ -174,7 +174,7 @@ pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
             mip_count: 1,
             alignment: 0x1000,
             array_count: 1,
-            size,
+            data_size: size,
             version: (1, 2),
         },
     }
@@ -207,7 +207,7 @@ pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
             mip_count: 1,
             alignment: 0,
             array_count: 1,
-            size,
+            data_size: size,
             version: (2, 0),
         },
     }
