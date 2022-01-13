@@ -9,54 +9,66 @@ use tegra_swizzle::{div_round_up, block_height_mip0, swizzle_block_linear};
 
 use crate::{NutexbFormat, NutexbFile, NutexbFooter};
 
+// TODO: It should be possible to make a NutexbFile from anything that is ToNutexb.
+
+/// A trait for creating a Nutexb from unswizzled image data.
+/// Implement this trait for an image type to support writing a nutexb file with [write_nutexb].
 pub trait ToNutexb {
-    fn get_width(&self) -> u32;
-    fn get_height(&self) -> u32;
-    fn get_depth(&self) -> u32;
+    fn width(&self) -> u32;
 
-    fn get_block_width(&self) -> u32;
-    fn get_block_height(&self) -> u32;
-    fn get_block_depth(&self) -> u32;
+    fn height(&self) -> u32;
 
-    fn get_image_data(&self) -> Vec<u8>;
+    fn depth(&self) -> u32;
 
-    fn get_bytes_per_pixel(&self) -> u32;
+    /// The width in pixels of a compressed block. This is typically 4 for compressed formats and should be left at 1 for uncompressed formats.
+    fn block_width(&self) -> u32;
+
+    /// The height in pixels of a compressed block. This is typically 4 for compressed formats and should be left at 1 for uncompressed formats.
+    fn block_height(&self) -> u32;
+
+    /// The depth in pixels of a compressed block. This should be left at 1.
+    fn block_depth(&self) -> u32;
+
+    // TODO: This should just be mipmaps.
+    fn image_data(&self) -> Vec<u8>;
+
+    fn bytes_per_pixel(&self) -> u32;
 
     fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
 }
 
 impl ToNutexb for image::DynamicImage {
-    fn get_width(&self) -> u32 {
+    fn width(&self) -> u32 {
         self.dimensions().0
     }
 
-    fn get_height(&self) -> u32 {
+    fn height(&self) -> u32 {
         self.dimensions().1
     }
 
-    fn get_depth(&self) -> u32 {
+    fn depth(&self) -> u32 {
         // No depth for a 2d image.
         1
     }
 
     // Uncompressed formats don't use block compression.
-    fn get_block_width(&self) -> u32 {
+    fn block_width(&self) -> u32 {
         1
     }
 
-    fn get_block_height(&self) -> u32 {
+    fn block_height(&self) -> u32 {
         1
     }
 
-    fn get_block_depth(&self) -> u32 {
+    fn block_depth(&self) -> u32 {
         1
     }
 
-    fn get_image_data(&self) -> Vec<u8> {
+    fn image_data(&self) -> Vec<u8> {
         self.to_rgba8().into_raw()
     }
 
-    fn get_bytes_per_pixel(&self) -> u32 {
+    fn bytes_per_pixel(&self) -> u32 {
         4 // RGBA
     }
 
@@ -66,37 +78,37 @@ impl ToNutexb for image::DynamicImage {
 }
 
 impl ToNutexb for ddsfile::Dds {
-    fn get_width(&self) -> u32 {
+    fn width(&self) -> u32 {
         self.get_width()
     }
 
-    fn get_height(&self) -> u32 {
+    fn height(&self) -> u32 {
         self.get_height()
     }
 
-    fn get_depth(&self) -> u32 {
+    fn depth(&self) -> u32 {
         // No depth for a 2d image.
         1
     }
 
     // TODO: Support other formats
-    fn get_block_width(&self) -> u32 {
+    fn block_width(&self) -> u32 {
         4
     }
 
-    fn get_block_height(&self) -> u32 {
+    fn block_height(&self) -> u32 {
         4
     }
 
-    fn get_block_depth(&self) -> u32 {
+    fn block_depth(&self) -> u32 {
         0
     }
 
-    fn get_image_data(&self) -> Vec<u8> {
+    fn image_data(&self) -> Vec<u8> {
         self.data.clone()
     }
 
-    fn get_bytes_per_pixel(&self) -> u32 {
+    fn bytes_per_pixel(&self) -> u32 {
         // TODO: Support other formats.
         16
     }
@@ -135,27 +147,29 @@ impl TryFrom<ddsfile::DxgiFormat> for NutexbFormat {
     }
 }
 
+/// Creates a [NutexbFile] with the nutexb string set to `name` and writes its data to `writer`.
+/// The result of [ToNutexb::image_data] is swizzled according to the specified dimensions and format.
 pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     name: S,
     image: &N,
     writer: &mut W,
 ) -> Result<(), Box<dyn Error>> {
-    let width = image.get_width();
-    let height = image.get_height();
-    let depth = image.get_depth();
+    let width = image.width();
+    let height = image.height();
+    let depth = image.depth();
 
-    let block_width = image.get_block_width();
-    let block_height = image.get_block_height();
-    let block_depth = image.get_block_depth();
+    let block_width = image.block_width();
+    let block_height = image.block_height();
+    let block_depth = image.block_depth();
 
-    let bytes_per_pixel = image.get_bytes_per_pixel();
+    let bytes_per_pixel = image.bytes_per_pixel();
 
     let block_height_mip0 = block_height_mip0(height as usize);
     let data = swizzle_block_linear(
         div_round_up(width as usize, block_width as usize),
         div_round_up(height as usize, block_height as usize),
         div_round_up(depth as usize, block_depth as usize),
-        &image.get_image_data(),
+        &image.image_data(),
         block_height_mip0,
         bytes_per_pixel as usize,
     ).unwrap();
@@ -182,16 +196,20 @@ pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     Ok(())
 }
 
+/// Writes a nutexb without any swizzling. Prefer [write_nutexb] for better memory access performance in most cases.
+/// 
+/// Textures created with [write_nutexb] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
+/// This function exists for the rare case where swizzling the image data is not desired for performance or compatibility reasons.
 pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     name: S,
     image: &N,
     writer: &mut W,
 ) -> Result<(), Box<dyn Error>> {
-    let width = image.get_width();
-    let height = image.get_height();
-    let depth = image.get_depth();
+    let width = image.width();
+    let height = image.height();
+    let depth = image.depth();
 
-    let data = image.get_image_data();
+    let data = image.image_data();
 
     let size = data.len() as u32;
     NutexbFile {
