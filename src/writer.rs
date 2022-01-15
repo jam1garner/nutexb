@@ -101,7 +101,7 @@ impl ToNutexb for ddsfile::Dds {
     }
 
     fn block_depth(&self) -> u32 {
-        0
+        1
     }
 
     fn image_data(&self) -> Vec<u8> {
@@ -164,7 +164,7 @@ pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
 
     let bytes_per_pixel = image.bytes_per_pixel();
 
-    let block_height_mip0 = block_height_mip0(height as usize);
+    let block_height_mip0 = block_height_mip0(div_round_up(height as usize, block_height as usize));
     let data = swizzle_block_linear(
         div_round_up(width as usize, block_width as usize),
         div_round_up(height as usize, block_height as usize),
