@@ -10,6 +10,7 @@ use tegra_swizzle::{block_height_mip0, div_round_up, mip_block_height, swizzle_b
 use crate::{NutexbFile, NutexbFooter, NutexbFormat};
 
 // TODO: It should be possible to make a NutexbFile from anything that is ToNutexb.
+// This avoids having to write the data somewhere.
 
 /// A trait for creating a Nutexb from unswizzled image data.
 /// Implement this trait for an image type to support writing a nutexb file with [write_nutexb].
@@ -20,19 +21,10 @@ pub trait ToNutexb {
 
     fn depth(&self) -> u32;
 
-    /// The width in pixels of a compressed block. This is typically 4 for compressed formats and should be left at 1 for uncompressed formats.
-    fn block_width(&self) -> u32;
-
-    /// The height in pixels of a compressed block. This is typically 4 for compressed formats and should be left at 1 for uncompressed formats.
-    fn block_height(&self) -> u32;
-
-    /// The depth in pixels of a compressed block. This should be left at 1.
-    fn block_depth(&self) -> u32;
-
     /// The raw image data for each mipmap layer before applying any swizzling.
-    fn mipmaps(&self) -> Vec<Vec<u8>>;
+    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>>;
 
-    fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
+    fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
 }
 
 impl ToNutexb for image::DynamicImage {
@@ -49,26 +41,11 @@ impl ToNutexb for image::DynamicImage {
         1
     }
 
-    // TODO: This can be inferred from the image format.
-    // TODO: Add tests for this conversion.
-    // Uncompressed formats don't use block compression.
-    fn block_width(&self) -> u32 {
-        1
+    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
+        Ok(vec![self.to_rgba8().into_raw()])
     }
 
-    fn block_height(&self) -> u32 {
-        1
-    }
-
-    fn block_depth(&self) -> u32 {
-        1
-    }
-
-    fn mipmaps(&self) -> Vec<Vec<u8>> {
-        vec![self.to_rgba8().into_raw()]
-    }
-
-    fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
+    fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
         Ok(NutexbFormat::R8G8B8A8Srgb)
     }
 }
@@ -87,20 +64,7 @@ impl ToNutexb for ddsfile::Dds {
         1
     }
 
-    // TODO: Support other formats
-    fn block_width(&self) -> u32 {
-        4
-    }
-
-    fn block_height(&self) -> u32 {
-        4
-    }
-
-    fn block_depth(&self) -> u32 {
-        1
-    }
-
-    fn mipmaps(&self) -> Vec<Vec<u8>> {
+    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
         // TODO: How to test this?
         let mut mipmaps = Vec::new();
 
@@ -121,10 +85,10 @@ impl ToNutexb for ddsfile::Dds {
 
         // TODO: Error if mip offset does not equal data size at this point?
 
-        mipmaps
+        Ok(mipmaps)
     }
 
-    fn try_get_image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
+    fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
         let format = self.get_dxgi_format().unwrap().try_into()?;
         Ok(format)
     }
@@ -159,7 +123,7 @@ impl TryFrom<ddsfile::DxgiFormat> for NutexbFormat {
 }
 
 /// Creates a [NutexbFile] with the nutexb string set to `name` and writes its data to `writer`.
-/// The result of [ToNutexb::image_data] is swizzled according to the specified dimensions and format.
+/// The result of [ToNutexb::mipmaps] is swizzled according to the specified dimensions and format.
 pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     name: S,
     image: &N,
@@ -169,15 +133,14 @@ pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     let height = image.height();
     let depth = image.depth();
 
-    let block_width = image.block_width();
-    let block_height = image.block_height();
-    // TODO: Support 3D textures.
-    let block_depth = image.block_depth();
-
-    let image_format = image.try_get_image_format()?;
+    let image_format = image.image_format()?;
     let bytes_per_pixel = image_format.bytes_per_pixel();
+    let block_width = image_format.block_width();
+    let block_height = image_format.block_height();
+    // TODO: Support 3D textures.
+    let block_depth = image_format.block_depth();
 
-    let mipmaps = image.mipmaps();
+    let mipmaps = image.mipmaps()?;
 
     // Mip sizes use the size before swizzling.
     let mip_sizes: Vec<u32> = mipmaps.iter().map(|m| m.len() as u32).collect();
@@ -262,7 +225,7 @@ pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
     let depth = image.depth();
 
     // TODO: Mipmaps
-    let data = image.mipmaps()[0].clone();
+    let data = image.mipmaps()?[0].clone();
 
     let size = data.len() as u32;
     NutexbFile {
@@ -273,7 +236,7 @@ pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
             width,
             height,
             depth,
-            image_format: image.try_get_image_format()?,
+            image_format: image.image_format()?,
             unk2: 2,
             mip_count: 1,
             alignment: 0,

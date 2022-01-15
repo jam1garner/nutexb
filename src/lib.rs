@@ -52,8 +52,8 @@ pub struct NutexbFooter {
     pub version: (u16, u16),
 
     /// The size in bytes of the deswizzled data for each mipmap.
-    /// 
-    /// Most nutexb files use swizzled image data, 
+    ///
+    /// Most nutexb files use swizzled image data,
     /// so these sizes won't add up to the length of [data](struct.NutexbFile.html#structfield.data).
     #[brw(seek_before = SeekFrom::End(-176))]
     #[br(count = mip_count)]
@@ -61,15 +61,15 @@ pub struct NutexbFooter {
 }
 
 /// Supported image data formats.
-/// 
+///
 /// These formats have a corresponding format in modern versions of graphics APIs like OpenGL, Vulkan, etc.
 /// Most of the compressed formats are supported by [Dds](ddsfile::Dds).
-/// 
+///
 /// In some contexts, "Unorm" is called "linear" or expanded to "unsigned normalized".
 /// "U" and "S" prefixes refer to "unsigned" and "signed" data, respectively.
-/// 
-/// Variants with "Srgb" store identical data as "Unorm" variants but signal to the graphics API to 
-/// convert from sRGB to linear gamma when accessing texture data. 
+///
+/// Variants with "Srgb" store identical data as "Unorm" variants but signal to the graphics API to
+/// convert from sRGB to linear gamma when accessing texture data.
 // TODO: It's possible this is some sort of flags.
 // num channels, format, type (srgb, unorm, etc)?
 // TODO: Add these as methods?
@@ -106,7 +106,7 @@ impl NutexbFormat {
     assert_eq!(1, NutexbFormat::R8Unorm.size_in_bytes());
     assert_eq!(4, NutexbFormat::R8G8B8A8Unorm.size_in_bytes());
     assert_eq!(8, NutexbFormat::BC1Unorm.size_in_bytes());
-    assert_eq!(16, NutexbFormat::BC7Unorm.size_in_bytes());
+    assert_eq!(16, NutexbFormat::BC7Srgb.size_in_bytes());
     assert_eq!(16, NutexbFormat::R32G32B32A32Float.size_in_bytes());
     ```
     */
@@ -126,6 +126,61 @@ impl NutexbFormat {
             NutexbFormat::BC7Unorm | NutexbFormat::BC7Srgb => 16,
             NutexbFormat::R8Unorm => 1,
         }
+    }
+
+    /// The width in pixels for a compressed block or `1` for uncompressed formats.
+    ///
+    /// # Examples
+    /**
+    ```rust
+    assert_eq!(1, NutexbFormat::R8Unorm.block_width());
+    assert_eq!(1, NutexbFormat::R8G8B8A8Unorm.block_width());
+    assert_eq!(4, NutexbFormat::BC1Unorm.block_width());
+    assert_eq!(4, NutexbFormat::BC7Srgb.block_width());
+    ```
+    */
+    pub fn block_width(&self) -> u32 {
+        match &self {
+            NutexbFormat::R8Unorm
+            | NutexbFormat::R8G8B8A8Unorm
+            | NutexbFormat::R8G8B8A8Srgb
+            | NutexbFormat::R32G32B32A32Float
+            | NutexbFormat::B8G8R8A8Unorm
+            | NutexbFormat::B8G8R8A8Srgb => 1,
+            _ => 4,
+        }
+    }
+
+    /// The height in pixels for a compressed block or `1` for uncompressed formats.
+    ///
+    /// # Examples
+    /**
+    ```rust
+    assert_eq!(1, NutexbFormat::R8Unorm.block_height());
+    assert_eq!(1, NutexbFormat::R8G8B8A8Unorm.block_height());
+    assert_eq!(4, NutexbFormat::BC1Unorm.block_height());
+    assert_eq!(4, NutexbFormat::BC7Srgb.block_height());
+    ```
+    */
+    pub fn block_height(&self) -> u32 {
+        // All known nutexb formats use square blocks.
+        self.block_width()
+    }
+
+    /// The depth in pixels for a compressed block or `1` for uncompressed formats.
+    ///
+    /// # Examples
+    /**
+    ```rust
+    assert_eq!(1, NutexbFormat::R8Unorm.block_depth());
+    assert_eq!(1, NutexbFormat::R8G8B8A8Unorm.block_depth());
+    assert_eq!(1, NutexbFormat::BC1Unorm.block_depth());
+    assert_eq!(1, NutexbFormat::BC7Srgb.block_depth());
+    ```
+    */
+    pub fn block_depth(&self) -> u32 {
+        // All known nutexb formats use 2D blocks.
+        1
     }
 }
 
