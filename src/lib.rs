@@ -36,6 +36,8 @@ use std::{
 pub use ddsfile;
 mod dds;
 
+pub use dds::create_dds;
+
 // TODO: make image support optional.
 pub use image;
 mod rgbaimage;
@@ -309,12 +311,12 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     let mip_count = mipmaps.len() as u32;
 
     let data = swizzle_mipmaps_to_data(
+        width as usize,
         height as usize,
         block_width as usize,
         block_height as usize,
-        mipmaps,
-        width as usize,
         bytes_per_pixel as usize,
+        mipmaps,
     );
 
     let size = data.len() as u32;

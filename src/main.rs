@@ -15,6 +15,11 @@ fn main() {
             let dds = nutexb::ddsfile::Dds::read(&mut reader).unwrap();
             nutexb::write_nutexb(output_name, &dds, &mut output_file).unwrap();
         }
+        "nutexb" => {
+            let nutexb = nutexb::NutexbFile::read_from_file(input_image_path).unwrap();
+            let dds = nutexb::create_dds(&nutexb);
+            dds.write(&mut output_file).unwrap();
+        }
         _ => {
             let image = image::open(input_image_path).unwrap();
             nutexb::write_nutexb(output_name, &image, &mut output_file).unwrap();
