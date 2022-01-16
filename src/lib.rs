@@ -1,3 +1,30 @@
+//! # nutexb
+//! Nutexb is an image texture format used in Super Smash Bros Ultimate and some other games.
+//! The extension ".nutexb" may stand for "Namco Universal Texture Binary".
+//!
+//! Image data is stored in a contiguous region of memory with metadata stored in the [NutexbFooter].
+//! The supported image formats in [NutexbFormat] use standard compressed and uncompressed formats used for DDS files.
+//! The arrays and mipmaps for the image data are stored in a memory layout optimized for the Tegra X1 in a process known as swizzling.
+//! This library provides tools for reading and writing nutexb files as well as working with the swizzled image data.
+//!
+//! ## Reading
+//!
+//! ## Writing
+//! The easiest way to create a [NutexbFile] is by implementing the [ToNutexb] trait and calling [create_nutexb].
+//! This trait is already implemented for [ddsfile::Dds] and [image::DynamicImage].
+/*!
+```rust no_run
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+use nutexb::create_nutexb;
+
+let image = image::open("col_001.png")?;
+let nutexb = create_nutexb(&image, "col_001")?;
+
+let mut writer = std::io::Cursor::new(Vec::new());
+nutexb.write(&mut writer)?;
+# Ok(()) }
+```
+ */
 use binrw::{prelude::*, NullString, ReadOptions};
 use mipmaps::swizzle_mipmaps_to_data;
 use std::{
@@ -10,7 +37,8 @@ pub use ddsfile;
 mod dds;
 
 // TODO: make image support optional.
-mod image;
+pub use image;
+mod rgbaimage;
 
 mod mipmaps;
 
@@ -133,11 +161,12 @@ impl NutexbFormat {
     /// For block compressed formats like [NutexbFormat::BC7Srgb], this is the size in bytes of a single block.
     /**
     ```rust
-    assert_eq!(1, NutexbFormat::R8Unorm.size_in_bytes());
-    assert_eq!(4, NutexbFormat::R8G8B8A8Unorm.size_in_bytes());
-    assert_eq!(8, NutexbFormat::BC1Unorm.size_in_bytes());
-    assert_eq!(16, NutexbFormat::BC7Srgb.size_in_bytes());
-    assert_eq!(16, NutexbFormat::R32G32B32A32Float.size_in_bytes());
+    # use nutexb::NutexbFormat;
+    assert_eq!(1, NutexbFormat::R8Unorm.bytes_per_pixel());
+    assert_eq!(4, NutexbFormat::R8G8B8A8Unorm.bytes_per_pixel());
+    assert_eq!(8, NutexbFormat::BC1Unorm.bytes_per_pixel());
+    assert_eq!(16, NutexbFormat::BC7Srgb.bytes_per_pixel());
+    assert_eq!(16, NutexbFormat::R32G32B32A32Float.bytes_per_pixel());
     ```
     */
     pub fn bytes_per_pixel(&self) -> u32 {
@@ -163,6 +192,7 @@ impl NutexbFormat {
     /// # Examples
     /**
     ```rust
+    # use nutexb::NutexbFormat;
     assert_eq!(1, NutexbFormat::R8Unorm.block_width());
     assert_eq!(1, NutexbFormat::R8G8B8A8Unorm.block_width());
     assert_eq!(4, NutexbFormat::BC1Unorm.block_width());
@@ -186,6 +216,7 @@ impl NutexbFormat {
     /// # Examples
     /**
     ```rust
+    # use nutexb::NutexbFormat;
     assert_eq!(1, NutexbFormat::R8Unorm.block_height());
     assert_eq!(1, NutexbFormat::R8G8B8A8Unorm.block_height());
     assert_eq!(4, NutexbFormat::BC1Unorm.block_height());
@@ -202,6 +233,7 @@ impl NutexbFormat {
     /// # Examples
     /**
     ```rust
+    # use nutexb::NutexbFormat;
     assert_eq!(1, NutexbFormat::R8Unorm.block_depth());
     assert_eq!(1, NutexbFormat::R8G8B8A8Unorm.block_depth());
     assert_eq!(1, NutexbFormat::BC1Unorm.block_depth());
