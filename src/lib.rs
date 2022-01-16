@@ -1,10 +1,18 @@
-pub mod parser;
-pub mod writer;
 use binrw::{prelude::*, NullString, ReadOptions};
-use std::io::{Read, Seek, SeekFrom};
+use mipmaps::swizzle_mipmaps_to_data;
+use std::{
+    error::Error,
+    io::{Cursor, Read, Seek, SeekFrom, Write},
+};
 
-// TODO: Make dds optional.
+// TODO: Make dds support optional.
 pub use ddsfile;
+mod dds;
+
+// TODO: make image support optional.
+mod image;
+
+mod mipmaps;
 
 /// The data stored in a nutexb file like `"def_001_col.nutexb"`.
 // TODO: Alignment requirements for the data or file length?
@@ -21,6 +29,28 @@ pub struct NutexbFile {
     #[br(seek_before = SeekFrom::End(-112))]
     #[bw(pad_before = 0x40)]
     pub footer: NutexbFooter,
+}
+
+impl NutexbFile {
+    /// Reads the [NutexbFile] from the specified `reader`.
+    pub fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        reader.read_le::<NutexbFile>()
+    }
+
+    /// Reads the [NutexbFile] from the specified `path`.
+    /// The entire file is buffered to improve performance.
+    pub fn read_from_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<NutexbFile, Box<dyn std::error::Error>> {
+        let mut file = Cursor::new(std::fs::read(path)?);
+        let nutexb = file.read_le::<NutexbFile>()?;
+        Ok(nutexb)
+    }
+
+    /// Writes the [NutexbFile] to the specified `writer`.
+    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> Result<(), Box<dyn Error>> {
+        self.write_to(writer).map_err(Into::into)
+    }
 }
 
 /// Information about the image data.
@@ -193,4 +223,130 @@ fn until_footer<R: Read + Seek>(reader: &mut R, _: &ReadOptions, _: ()) -> BinRe
     let mut data = vec![0u8; footer_start as usize];
     reader.read_exact(&mut data)?;
     Ok(data)
+}
+
+// TODO: It should be possible to make a NutexbFile from anything that is ToNutexb.
+// This avoids having to write the data somewhere.
+
+/// A trait for creating a Nutexb from unswizzled image data.
+/// Implement this trait for an image type to support writing a nutexb file with [write_nutexb].
+pub trait ToNutexb {
+    fn width(&self) -> u32;
+
+    fn height(&self) -> u32;
+
+    fn depth(&self) -> u32;
+
+    /// The raw image data for each mipmap layer before applying any swizzling.
+    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>>;
+
+    fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
+}
+
+// TODO: Do we need these write functions?
+/// Creates a [NutexbFile] with the nutexb string set to `name` and writes its data to `writer`.
+pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
+    name: S,
+    image: &N,
+    writer: &mut W,
+) -> Result<(), Box<dyn Error>> {
+    create_nutexb(image, name)?.write(writer)
+}
+
+/// Creates a [NutexbFile] from `image` with the nutexb string set to `name`.
+/// The result of [ToNutexb::mipmaps] is swizzled according to the specified dimensions and format.
+pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
+    image: &N,
+    name: S,
+) -> Result<NutexbFile, Box<dyn Error>> {
+    let width = image.width();
+    let height = image.height();
+    let depth = image.depth();
+
+    let image_format = image.image_format()?;
+    let bytes_per_pixel = image_format.bytes_per_pixel();
+    let block_width = image_format.block_width();
+    let block_height = image_format.block_height();
+    // TODO: Support 3D textures.
+    let block_depth = image_format.block_depth();
+
+    let mipmaps = image.mipmaps()?;
+
+    // Mip sizes use the size before swizzling.
+    let mip_sizes: Vec<u32> = mipmaps.iter().map(|m| m.len() as u32).collect();
+    let mip_count = mipmaps.len() as u32;
+
+    let data = swizzle_mipmaps_to_data(
+        height as usize,
+        block_width as usize,
+        block_height as usize,
+        mipmaps,
+        width as usize,
+        bytes_per_pixel as usize,
+    );
+
+    let size = data.len() as u32;
+
+    Ok(NutexbFile {
+        data,
+        footer: NutexbFooter {
+            mip_sizes,
+            string: NullString::from_string(name.into()),
+            width,
+            height,
+            depth,
+            image_format,
+            unk2: 4,
+            mip_count,
+            alignment: 0x1000,
+            array_count: 1,
+            data_size: size,
+            version: (1, 2),
+        },
+    })
+}
+
+/// Creates a [NutexbFile] from `image` with the nutexb string set to `name` without any swizzling.
+/// Prefer [create_nutexb] for better memory access performance in most cases.
+///
+/// Textures created with [create_nutexb] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
+/// This function exists for the rare case where swizzling the image data is not desired for performance or compatibility reasons.
+pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
+    image: &N,
+    name: S,
+) -> Result<NutexbFile, Box<dyn Error>> {
+    let width = image.width();
+    let height = image.height();
+    let depth = image.depth();
+
+    // TODO: Mipmaps
+    let data = image.mipmaps()?[0].clone();
+
+    let size = data.len() as u32;
+    Ok(NutexbFile {
+        data,
+        footer: NutexbFooter {
+            mip_sizes: vec![size as u32],
+            string: NullString::from_string(name.into()),
+            width,
+            height,
+            depth,
+            image_format: image.image_format()?,
+            unk2: 2,
+            mip_count: 1,
+            alignment: 0,
+            array_count: 1,
+            data_size: size,
+            version: (2, 0),
+        },
+    })
+}
+
+/// Writes a nutexb without any swizzling.
+pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
+    name: S,
+    image: &N,
+    writer: &mut W,
+) -> Result<(), Box<dyn Error>> {
+    create_nutexb_unswizzled(image, name)?.write(writer)
 }
