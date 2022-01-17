@@ -6,7 +6,7 @@ use std::{
 use ddsfile::{Dds, DxgiFormat};
 use tegra_swizzle::div_round_up;
 
-use crate::{mipmaps::deswizzle_data_to_mipmaps, NutexbFile, NutexbFormat, ToNutexb};
+use crate::{NutexbFile, NutexbFormat, ToNutexb};
 
 impl ToNutexb for ddsfile::Dds {
     fn width(&self) -> u32 {
@@ -42,8 +42,8 @@ impl ToNutexb for ddsfile::Dds {
         for mip in 0..self.get_num_mipmap_levels() {
             // Halve width and height for each mip level after the base level.
             // The minimum mipmap size depends on the format.
-            let mip_width = div_round_up(width >> mip, block_width);
-            let mip_height = div_round_up(height >> mip, block_height);
+            let mip_width = std::cmp::max(div_round_up(width >> mip, block_width), 1);
+            let mip_height = std::cmp::max(div_round_up(height >> mip, block_height), 1);
 
             let mip_size = mip_width * mip_height * bytes_per_pixel;
             let mip_size = std::cmp::max(mip_size, self.get_min_mipmap_size_in_bytes() as usize);
@@ -54,7 +54,6 @@ impl ToNutexb for ddsfile::Dds {
         }
 
         // TODO: Error if mip offset does not equal data size at this point?
-        dbg!(self.data.len(), mip_offset);
         Ok(mipmaps)
     }
 
@@ -143,23 +142,8 @@ pub fn create_dds(nutexb: &NutexbFile) -> Dds {
     )
     .unwrap();
 
-    dbg!(nutexb.footer.mip_count as usize);
     // DDS stores mipmaps in a contiguous region of memory.
-    let combined_data = deswizzle_data_to_mipmaps(
-        nutexb.footer.width as usize,
-        nutexb.footer.height as usize,
-        nutexb.footer.image_format.block_width() as usize,
-        nutexb.footer.image_format.block_height() as usize,
-        nutexb.footer.image_format.bytes_per_pixel() as usize,
-        nutexb.footer.mip_count as usize,
-        &nutexb.data,
-    )
-    .into_iter()
-    .flatten()
-    .collect();
-
-    dds.data = combined_data;
-    dbg!(dds.get_num_mipmap_levels());
+    dds.data = nutexb.deswizzled_data();
 
     dds
 }

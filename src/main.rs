@@ -9,6 +9,7 @@ fn main() {
     let output_file = std::fs::File::create(output_nutex_path).unwrap();
     let mut output_file = std::io::BufWriter::new(output_file);
 
+    let start = std::time::Instant::now();
     match input_image_path.extension().unwrap().to_str().unwrap() {
         "dds" => {
             let mut reader = std::fs::File::open(input_image_path).unwrap();
@@ -25,4 +26,5 @@ fn main() {
             nutexb::write_nutexb(output_name, &image, &mut output_file).unwrap();
         }
     }
+    println!("Completed operation in {:?}", start.elapsed());
 }

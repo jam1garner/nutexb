@@ -16,3 +16,6 @@ ddsfile = { git = "https://github.com/SiegeEngine/ddsfile" }
 image = "0.23.10"
 tegra_swizzle = "0.1.0"
 binrw = "0.8.4"
+
+[profile.release]
+debug = true

@@ -26,7 +26,7 @@ nutexb.write(&mut writer)?;
 ```
  */
 use binrw::{prelude::*, NullString, ReadOptions};
-use mipmaps::swizzle_mipmaps_to_data;
+use mipmaps::{deswizzle_data_to_mipmaps, swizzle_mipmaps_to_data, deswizzle_data};
 use std::{
     error::Error,
     io::{Cursor, Read, Seek, SeekFrom, Write},
@@ -80,6 +80,30 @@ impl NutexbFile {
     /// Writes the [NutexbFile] to the specified `writer`.
     pub fn write<W: Write + Seek>(&self, writer: &mut W) -> Result<(), Box<dyn Error>> {
         self.write_to(writer).map_err(Into::into)
+    }
+
+    pub fn deswizzled_mipmaps(&self) -> Vec<Vec<u8>> {
+        deswizzle_data_to_mipmaps(
+            self.footer.width as usize,
+            self.footer.height as usize,
+            self.footer.image_format.block_width() as usize,
+            self.footer.image_format.block_height() as usize,
+            self.footer.image_format.bytes_per_pixel() as usize,
+            self.footer.mip_count as usize,
+            &self.data,
+        )
+    }
+
+    pub fn deswizzled_data(&self) -> Vec<u8> {
+        deswizzle_data(
+            self.footer.width as usize,
+            self.footer.height as usize,
+            self.footer.image_format.block_width() as usize,
+            self.footer.image_format.block_height() as usize,
+            self.footer.image_format.bytes_per_pixel() as usize,
+            self.footer.mip_count as usize,
+            &self.data,
+        )
     }
 }
 
