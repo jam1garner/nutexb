@@ -39,9 +39,6 @@ impl ToNutexb for ddsfile::Dds {
         // TODO: Support 3D textures.
         let block_depth = image_format.block_depth() as usize;
 
-        // TODO: There is a bug in ddsfile for creating dxgi DDS files.
-        // The mipmap count is always set to 1.
-        // This doesn't apply to DDS files created by other applications.
         for mip in 0..self.get_num_mipmap_levels() {
             // Halve width and height for each mip level after the base level.
             // The minimum mipmap size depends on the format.
