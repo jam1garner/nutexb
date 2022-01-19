@@ -3,8 +3,7 @@ use std::{
     error::Error,
 };
 
-use ddsfile::{Dds, DxgiFormat};
-use tegra_swizzle::div_round_up;
+use ddsfile::{Dds, DxgiFormat, NewDxgiParams};
 
 use crate::{NutexbFile, NutexbFormat, ToNutexb};
 
@@ -22,39 +21,22 @@ impl ToNutexb for ddsfile::Dds {
         1
     }
 
-    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
-        // TODO: How to test this?
-        let mut mipmaps = Vec::new();
+    fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
+        Ok(self.data.clone())
+    }
 
-        // DDS doesn't encode the mip offsets or sizes directly.
-        // Assume no padding between mipmaps to allow for calculating offsets.
-        let mut mip_offset = 0;
-        let width = self.header.width as usize;
-        let height = self.header.height as usize;
+    fn mipmap_count(&self) -> u32 {
+        self.get_num_mipmap_levels()
+    }
 
-        let image_format = self.image_format()?;
-        let bytes_per_pixel = image_format.bytes_per_pixel() as usize;
-        let block_width = image_format.block_width() as usize;
-        let block_height = image_format.block_height() as usize;
-        // TODO: Support 3D textures.
-        let block_depth = image_format.block_depth() as usize;
-
-        for mip in 0..self.get_num_mipmap_levels() {
-            // Halve width and height for each mip level after the base level.
-            // The minimum mipmap size depends on the format.
-            let mip_width = std::cmp::max(div_round_up(width >> mip, block_width), 1);
-            let mip_height = std::cmp::max(div_round_up(height >> mip, block_height), 1);
-
-            let mip_size = mip_width * mip_height * bytes_per_pixel;
-            let mip_size = std::cmp::max(mip_size, self.get_min_mipmap_size_in_bytes() as usize);
-
-            mipmaps.push(self.data[mip_offset..mip_offset + mip_size].to_vec());
-
-            mip_offset += mip_size;
+    fn layer_count(&self) -> u32 {
+        // Array layers for DDS are calculated differently for cube maps.
+        if matches!(&self.header10, Some(header10) if header10.misc_flag == ddsfile::MiscFlag::TEXTURECUBE)
+        {
+            self.get_num_array_layers() * 6
+        } else {
+            self.get_num_array_layers()
         }
-
-        // TODO: Error if mip offset does not equal data size at this point?
-        Ok(mipmaps)
     }
 
     fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
@@ -128,18 +110,23 @@ impl From<NutexbFormat> for DxgiFormat {
 
 pub fn create_dds(nutexb: &NutexbFile) -> Dds {
     // TODO: 3D Support.
-    let mut dds = Dds::new_dxgi(
-        nutexb.footer.height,
-        nutexb.footer.width,
-        None,
-        nutexb.footer.image_format.into(),
-        Some(nutexb.footer.mip_count),
-        None,
-        None,
-        false,
-        ddsfile::D3D10ResourceDimension::Texture2D,
-        ddsfile::AlphaMode::Unknown, // TODO: Alpha mode?
-    )
+    // We don't actually need to set the array count here.
+    // Cube maps are set using the appropriate flag.
+    // Setting both the flag and arrays would create an array of 6 cube maps.
+    // TODO: ddsfile has no way of reading this flag?
+    let some_if_above_one = |x| if x > 0 { Some(x) } else { None };
+    let mut dds = Dds::new_dxgi(NewDxgiParams {
+        height: nutexb.footer.height,
+        width: nutexb.footer.width,
+        depth: some_if_above_one(nutexb.footer.depth),
+        format: nutexb.footer.image_format.into(),
+        mipmap_levels: some_if_above_one(nutexb.footer.mipmap_count),
+        array_layers: some_if_above_one(nutexb.footer.layer_count),
+        caps2: None,
+        is_cubemap: nutexb.footer.layer_count == 6,
+        resource_dimension: ddsfile::D3D10ResourceDimension::Texture2D, // TODO: 3D for depth?
+        alpha_mode: ddsfile::AlphaMode::Unknown,
+    })
     .unwrap();
 
     // DDS stores mipmaps in a contiguous region of memory.

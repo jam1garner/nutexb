@@ -17,11 +17,20 @@ impl ToNutexb for image::DynamicImage {
         1
     }
 
-    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>> {
-        Ok(vec![self.to_rgba8().into_raw()])
+    fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
+        Ok(self.to_rgba8().into_raw())
     }
 
     fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
         Ok(NutexbFormat::R8G8B8A8Srgb)
+    }
+
+    // TODO: Generate mipmaps?
+    fn mipmap_count(&self) -> u32 {
+        1
+    }
+
+    fn layer_count(&self) -> u32 {
+        1
     }
 }

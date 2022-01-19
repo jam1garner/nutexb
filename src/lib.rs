@@ -25,12 +25,13 @@ nutexb.write(&mut writer)?;
 # Ok(()) }
 ```
  */
-use binrw::{prelude::*, NullString, ReadOptions};
-use mipmaps::{deswizzle_data_to_mipmaps, swizzle_mipmaps_to_data, deswizzle_data};
+use binrw::{binrw, prelude::*, NullString, ReadOptions, VecArgs};
+use mipmaps::{deswizzle_data, swizzle_data};
 use std::{
     error::Error,
     io::{Cursor, Read, Seek, SeekFrom, Write},
 };
+use tegra_swizzle::div_round_up;
 
 // TODO: Make dds support optional.
 pub use ddsfile;
@@ -44,21 +45,63 @@ mod rgbaimage;
 
 mod mipmaps;
 
+const FOOTER_SIZE: usize = 112;
+const LAYER_MIPMAPS_SIZE: usize = 64;
+
 /// The data stored in a nutexb file like `"def_001_col.nutexb"`.
 // TODO: Alignment requirements for the data or file length?
-#[derive(BinRead, BinWrite, Debug, Clone)]
+#[derive(Debug, Clone, BinWrite)]
 pub struct NutexbFile {
     /// Combined image data for all array and mipmap levels.
     // Use a custom parser since we don't know the length yet.
-    #[br(parse_with = until_footer)]
     pub data: Vec<u8>,
 
+    /// The size of the mipmaps for each array layer.
+    ///
+    /// Most nutexb files use swizzled image data,
+    /// so these sizes won't add up to the length of [data](struct.NutexbFile.html#structfield.data).
+    pub layer_mipmaps: Vec<LayerMipmaps>,
+
     /// Information about the image stored in [data](#structfield.data).
-    // Add padding on write to fill in mip sizes later.
-    // TODO: Does nutexb support more than 16 mips (0x40 bytes)?
-    #[br(seek_before = SeekFrom::End(-112))]
-    #[bw(pad_before = 0x40)]
     pub footer: NutexbFooter,
+}
+
+impl BinRead for NutexbFile {
+    type Args = ();
+
+    fn read_options<R: Read + Seek>(
+        reader: &mut R,
+        options: &ReadOptions,
+        args: Self::Args,
+    ) -> BinResult<Self> {
+        // We need the footer to know the size of the layer mipmaps.
+        reader.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
+        let footer: NutexbFooter = reader.read_le()?;
+
+        // We need the layer mipmaps to know the size of the data section.
+        reader.seek(SeekFrom::Current(
+            -(FOOTER_SIZE as i64 + LAYER_MIPMAPS_SIZE as i64 * footer.layer_count as i64),
+        ))?;
+
+        // The image data takes up the remaining space.
+        let data_size = reader.stream_position()?;
+
+        let layer_mipmaps: Vec<LayerMipmaps> = reader.read_le_args(VecArgs {
+            count: footer.layer_count as usize,
+            inner: (footer.mipmap_count,),
+        })?;
+
+        reader.seek(SeekFrom::Start(0))?;
+
+        let mut data = vec![0u8; data_size as usize];
+        reader.read_exact(&mut data)?;
+
+        Ok(Self {
+            data,
+            layer_mipmaps,
+            footer,
+        })
+    }
 }
 
 impl NutexbFile {
@@ -82,18 +125,6 @@ impl NutexbFile {
         self.write_to(writer).map_err(Into::into)
     }
 
-    pub fn deswizzled_mipmaps(&self) -> Vec<Vec<u8>> {
-        deswizzle_data_to_mipmaps(
-            self.footer.width as usize,
-            self.footer.height as usize,
-            self.footer.image_format.block_width() as usize,
-            self.footer.image_format.block_height() as usize,
-            self.footer.image_format.bytes_per_pixel() as usize,
-            self.footer.mip_count as usize,
-            &self.data,
-        )
-    }
-
     pub fn deswizzled_data(&self) -> Vec<u8> {
         deswizzle_data(
             self.footer.width as usize,
@@ -101,14 +132,16 @@ impl NutexbFile {
             self.footer.image_format.block_width() as usize,
             self.footer.image_format.block_height() as usize,
             self.footer.image_format.bytes_per_pixel() as usize,
-            self.footer.mip_count as usize,
             &self.data,
+            self.footer.mipmap_count as usize,
+            self.footer.layer_count as usize,
         )
     }
 }
 
 /// Information about the image data.
-#[derive(BinRead, BinWrite, Debug, Clone)]
+#[binrw]
+#[derive(Debug, Clone)]
 #[brw(magic = b" XNT")]
 pub struct NutexbFooter {
     // TODO: Make this field "name: String"
@@ -126,22 +159,24 @@ pub struct NutexbFooter {
     pub image_format: NutexbFormat,
     pub unk2: u32,
     /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
-    pub mip_count: u32,
+    pub mipmap_count: u32,
     pub alignment: u32, // TODO: Fix this field name
-    /// The number of texture arrays in [data](struct.NutexbFile.html#structfield.data). This is 6 for cubemaps and 1 otherwise.
-    pub array_count: u32,
+    /// The number of texture layers in [data](struct.NutexbFile.html#structfield.data). This is 6 for cubemaps and 1 otherwise.
+    pub layer_count: u32,
     /// The size in bytes of [data](struct.NutexbFile.html#structfield.data).
     pub data_size: u32,
     #[brw(magic = b" XET")]
     pub version: (u16, u16),
+}
 
+#[binrw]
+#[derive(Debug, Clone)]
+#[br(import(mipmap_count: u32))]
+pub struct LayerMipmaps {
     /// The size in bytes of the deswizzled data for each mipmap.
-    ///
-    /// Most nutexb files use swizzled image data,
-    /// so these sizes won't add up to the length of [data](struct.NutexbFile.html#structfield.data).
-    #[brw(seek_before = SeekFrom::End(-176))]
-    #[br(count = mip_count)]
-    pub mip_sizes: Vec<u32>,
+    #[brw(pad_size_to = 0x40)]
+    #[br(count = mipmap_count)]
+    pub mipmap_sizes: Vec<u32>,
 }
 
 /// Supported image data formats.
@@ -272,6 +307,7 @@ impl NutexbFormat {
     }
 }
 
+// TODO: We need to rework this?
 fn until_footer<R: Read + Seek>(reader: &mut R, _: &ReadOptions, _: ()) -> BinResult<Vec<u8>> {
     // Assume the footer has a fixed size.
     // Smash Ultimate doesn't require the footer to correctly report the image size.
@@ -295,8 +331,13 @@ pub trait ToNutexb {
 
     fn depth(&self) -> u32;
 
-    /// The raw image data for each mipmap layer before applying any swizzling.
-    fn mipmaps(&self) -> Result<Vec<Vec<u8>>, Box<dyn Error>>;
+    /// The raw image data for each layer and mipmap before applying any swizzling.
+    fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>>;
+
+    // TODO: Add an option to generate mipmaps?
+    fn mipmap_count(&self) -> u32;
+
+    fn layer_count(&self) -> u32;
 
     fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
 }
@@ -328,43 +369,88 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     // TODO: Support 3D textures.
     let block_depth = image_format.block_depth();
 
-    let mipmaps = image.mipmaps()?;
+    let image_data = image.image_data()?;
 
-    // Mip sizes use the size before swizzling.
-    let mip_sizes: Vec<u32> = mipmaps.iter().map(|m| m.len() as u32).collect();
-    let mip_count = mipmaps.len() as u32;
+    let mip_count = image.mipmap_count();
 
-    let data = swizzle_mipmaps_to_data(
+    let layer_count = image.layer_count();
+
+    let layer_mipmaps = calculate_layer_mip_sizes(
+        width,
+        height,
+        block_width,
+        block_height,
+        bytes_per_pixel,
+        mip_count,
+        layer_count,
+    );
+
+    let data = swizzle_data(
         width as usize,
         height as usize,
         block_width as usize,
         block_height as usize,
         bytes_per_pixel as usize,
-        mipmaps,
+        &image_data,
+        mip_count as usize,
+        layer_count as usize,
     );
 
     let size = data.len() as u32;
 
     Ok(NutexbFile {
         data,
+        layer_mipmaps,
         footer: NutexbFooter {
-            mip_sizes,
             string: NullString::from_string(name.into()),
             width,
             height,
             depth,
             image_format,
             unk2: 4,
-            mip_count,
+            mipmap_count: mip_count,
             alignment: 0x1000,
-            array_count: 1,
+            layer_count,
             data_size: size,
             version: (1, 2),
         },
     })
 }
 
+// TODO: Move into tegra_swizzle?
+fn calculate_layer_mip_sizes(
+    width: u32,
+    height: u32,
+    block_width: u32,
+    block_height: u32,
+    bytes_per_pixel: u32,
+    mip_count: u32,
+    layer_count: u32,
+) -> Vec<LayerMipmaps> {
+    // Mipmaps are repeated for each layer.
+    let layer = LayerMipmaps {
+        mipmap_sizes: (0..mip_count as usize)
+            .into_iter()
+            .map(|mip| {
+                // Halve width and height for each mip level after the base level.
+                // The minimum mipmap size depends on the format.
+                let mip_width =
+                    std::cmp::max(div_round_up(width as usize >> mip, block_width as usize), 1);
+                let mip_height = std::cmp::max(
+                    div_round_up(height as usize >> mip, block_height as usize),
+                    1,
+                );
+
+                let mip_size = mip_width * mip_height * bytes_per_pixel as usize;
+                std::cmp::max(mip_size, bytes_per_pixel as usize) as u32
+            })
+            .collect(),
+    };
+    vec![layer; layer_count as usize]
+}
+
 /// Creates a [NutexbFile] from `image` with the nutexb string set to `name` without any swizzling.
+/// This assumes no layers or mipmaps for `image`.
 /// Prefer [create_nutexb] for better memory access performance in most cases.
 ///
 /// Textures created with [create_nutexb] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
@@ -378,22 +464,39 @@ pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
     let depth = image.depth();
 
     // TODO: Mipmaps
-    let data = image.mipmaps()?[0].clone();
+    let data = image.image_data()?;
+
+    let image_format = image.image_format()?;
+    let bytes_per_pixel = image_format.bytes_per_pixel();
+    let block_width = image_format.block_width();
+    let block_height = image_format.block_height();
+    // TODO: Support 3D textures.
+    let block_depth = image_format.block_depth();
+
+    let layer_mipmaps = calculate_layer_mip_sizes(
+        width,
+        height,
+        block_width,
+        block_height,
+        bytes_per_pixel,
+        1,
+        1,
+    );
 
     let size = data.len() as u32;
     Ok(NutexbFile {
         data,
+        layer_mipmaps,
         footer: NutexbFooter {
-            mip_sizes: vec![size as u32],
             string: NullString::from_string(name.into()),
             width,
             height,
             depth,
-            image_format: image.image_format()?,
+            image_format,
             unk2: 2,
-            mip_count: 1,
+            mipmap_count: 1,
             alignment: 0,
-            array_count: 1,
+            layer_count: 1,
             data_size: size,
             version: (2, 0),
         },
