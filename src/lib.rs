@@ -28,6 +28,7 @@ nutexb.write(&mut writer)?;
 use binrw::{binrw, prelude::*, NullString, ReadOptions, VecArgs};
 use mipmaps::{deswizzle_data, swizzle_data};
 use std::{
+    cmp::max,
     error::Error,
     io::{Cursor, Read, Seek, SeekFrom, Write},
 };
@@ -143,7 +144,7 @@ impl NutexbFile {
 
 /// Information about the image data.
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[brw(magic = b" XNT")]
 pub struct NutexbFooter {
     // TODO: Make this field "name: String"
@@ -159,7 +160,7 @@ pub struct NutexbFooter {
     pub depth: u32,
     /// The format of [data](struct.NutexbFile.html#structfield.data).
     pub image_format: NutexbFormat,
-    pub unk2: u32, // TODO: How to set this?
+    pub unk2: u32, // TODO: Some kind of flags?
     /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
     pub mipmap_count: u32,
     pub alignment: u32, // TODO: Fix this field name
@@ -367,8 +368,10 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     let layer_mipmaps = calculate_layer_mip_sizes(
         width,
         height,
+        depth,
         block_width,
         block_height,
+        block_depth,
         bytes_per_pixel,
         mip_count,
         layer_count,
@@ -389,6 +392,8 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
 
     let size = data.len() as u32;
 
+    let unk2 = unk2(depth, layer_count);
+
     Ok(NutexbFile {
         data,
         layer_mipmaps,
@@ -398,7 +403,7 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
             height,
             depth,
             image_format,
-            unk2: 4,
+            unk2,
             mipmap_count: mip_count,
             alignment: 0x1000,
             layer_count,
@@ -408,12 +413,25 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     })
 }
 
+fn unk2(depth: u32, layer_count: u32) -> u32 {
+    // TODO: What does this value do?
+    if depth > 1 {
+        8
+    } else if layer_count > 1 {
+        9
+    } else {
+        4
+    }
+}
+
 // TODO: Move into tegra_swizzle?
 fn calculate_layer_mip_sizes(
     width: u32,
     height: u32,
+    depth: u32,
     block_width: u32,
     block_height: u32,
+    block_depth: u32,
     bytes_per_pixel: u32,
     mip_count: u32,
     layer_count: u32,
@@ -425,15 +443,15 @@ fn calculate_layer_mip_sizes(
             .map(|mip| {
                 // Halve width and height for each mip level after the base level.
                 // The minimum mipmap size depends on the format.
-                let mip_width =
-                    std::cmp::max(div_round_up(width as usize >> mip, block_width as usize), 1);
-                let mip_height = std::cmp::max(
+                let mip_width = max(div_round_up(width as usize >> mip, block_width as usize), 1);
+                let mip_height = max(
                     div_round_up(height as usize >> mip, block_height as usize),
                     1,
                 );
+                let mip_depth = max(div_round_up(depth as usize >> mip, block_depth as usize), 1);
 
-                let mip_size = mip_width * mip_height * bytes_per_pixel as usize;
-                std::cmp::max(mip_size, bytes_per_pixel as usize) as u32
+                let mip_size = mip_width * mip_height * mip_depth * bytes_per_pixel as usize;
+                max(mip_size, bytes_per_pixel as usize) as u32
             })
             .collect(),
     };
@@ -467,8 +485,10 @@ pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
     let layer_mipmaps = calculate_layer_mip_sizes(
         width,
         height,
+        depth,
         block_width,
         block_height,
+        block_depth,
         bytes_per_pixel,
         1,
         1,
