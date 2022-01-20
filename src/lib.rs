@@ -129,8 +129,10 @@ impl NutexbFile {
         deswizzle_data(
             self.footer.width as usize,
             self.footer.height as usize,
+            self.footer.depth as usize,
             self.footer.image_format.block_width() as usize,
             self.footer.image_format.block_height() as usize,
+            self.footer.image_format.block_depth() as usize,
             self.footer.image_format.bytes_per_pixel() as usize,
             &self.data,
             self.footer.mipmap_count as usize,
@@ -157,7 +159,7 @@ pub struct NutexbFooter {
     pub depth: u32,
     /// The format of [data](struct.NutexbFile.html#structfield.data).
     pub image_format: NutexbFormat,
-    pub unk2: u32,
+    pub unk2: u32, // TODO: How to set this?
     /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
     pub mipmap_count: u32,
     pub alignment: u32, // TODO: Fix this field name
@@ -307,18 +309,6 @@ impl NutexbFormat {
     }
 }
 
-// TODO: We need to rework this?
-fn until_footer<R: Read + Seek>(reader: &mut R, _: &ReadOptions, _: ()) -> BinResult<Vec<u8>> {
-    // Assume the footer has a fixed size.
-    // Smash Ultimate doesn't require the footer to correctly report the image size.
-    let footer_start = reader.seek(SeekFrom::End(-176))?;
-    reader.seek(SeekFrom::Start(0))?;
-
-    let mut data = vec![0u8; footer_start as usize];
-    reader.read_exact(&mut data)?;
-    Ok(data)
-}
-
 // TODO: It should be possible to make a NutexbFile from anything that is ToNutexb.
 // This avoids having to write the data somewhere.
 
@@ -366,7 +356,6 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     let bytes_per_pixel = image_format.bytes_per_pixel();
     let block_width = image_format.block_width();
     let block_height = image_format.block_height();
-    // TODO: Support 3D textures.
     let block_depth = image_format.block_depth();
 
     let image_data = image.image_data()?;
@@ -388,8 +377,10 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     let data = swizzle_data(
         width as usize,
         height as usize,
+        depth as usize,
         block_width as usize,
         block_height as usize,
+        block_depth as usize,
         bytes_per_pixel as usize,
         &image_data,
         mip_count as usize,

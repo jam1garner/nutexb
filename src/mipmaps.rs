@@ -1,8 +1,14 @@
+use std::num::NonZeroUsize;
+
+use tegra_swizzle::surface::BlockDim;
+
 pub fn swizzle_data(
     width: usize,
     height: usize,
+    depth: usize,
     block_width: usize,
     block_height: usize,
+    block_depth: usize,
     bytes_per_pixel: usize,
     data: &[u8],
     mipmap_count: usize,
@@ -14,11 +20,13 @@ pub fn swizzle_data(
     tegra_swizzle::surface::swizzle_surface(
         width,
         height,
-        1,
-        &data,
-        block_width,
-        block_height,
-        1,
+        depth,
+        data,
+        BlockDim {
+            width: NonZeroUsize::new(block_width).unwrap(),
+            height: NonZeroUsize::new(block_height).unwrap(),
+            depth: NonZeroUsize::new(block_depth).unwrap(),
+        },
         None,
         bytes_per_pixel,
         mipmap_count,
@@ -31,8 +39,10 @@ pub fn swizzle_data(
 pub fn deswizzle_data(
     width: usize,
     height: usize,
+    depth: usize,
     block_width: usize,
     block_height: usize,
+    block_depth: usize,
     bytes_per_pixel: usize,
     data: &[u8],
     mipmap_count: usize,
@@ -43,11 +53,13 @@ pub fn deswizzle_data(
     tegra_swizzle::surface::deswizzle_surface(
         width,
         height,
-        1,
+        depth,
         data,
-        block_width,
-        block_height,
-        1,
+        BlockDim {
+            width: NonZeroUsize::new(block_width).unwrap(),
+            height: NonZeroUsize::new(block_height).unwrap(),
+            depth: NonZeroUsize::new(block_depth).unwrap(),
+        },
         None,
         bytes_per_pixel,
         mipmap_count,

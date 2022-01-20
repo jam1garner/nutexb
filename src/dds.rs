@@ -3,7 +3,7 @@ use std::{
     error::Error,
 };
 
-use ddsfile::{Dds, DxgiFormat, NewDxgiParams};
+use ddsfile::{AlphaMode, Caps2, D3D10ResourceDimension, Dds, DxgiFormat, MiscFlag, NewDxgiParams};
 
 use crate::{NutexbFile, NutexbFormat, ToNutexb};
 
@@ -17,8 +17,7 @@ impl ToNutexb for ddsfile::Dds {
     }
 
     fn depth(&self) -> u32 {
-        // No depth for a 2d image.
-        1
+        self.get_depth()
     }
 
     fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
@@ -55,6 +54,7 @@ impl TryFrom<DxgiFormat> for NutexbFormat {
             DxgiFormat::R8_UNorm => Ok(NutexbFormat::R8Unorm),
             DxgiFormat::R8G8B8A8_UNorm => Ok(NutexbFormat::R8G8B8A8Unorm),
             DxgiFormat::R8G8B8A8_UNorm_sRGB => Ok(NutexbFormat::R8G8B8A8Srgb),
+            DxgiFormat::R32G32B32A32_Float => Ok(NutexbFormat::R32G32B32A32Float),
             DxgiFormat::B8G8R8A8_UNorm => Ok(NutexbFormat::B8G8R8A8Unorm),
             DxgiFormat::B8G8R8A8_UNorm_sRGB => Ok(NutexbFormat::B8G8R8A8Srgb),
             DxgiFormat::BC1_UNorm => Ok(NutexbFormat::BC1Unorm),
@@ -122,10 +122,18 @@ pub fn create_dds(nutexb: &NutexbFile) -> Dds {
         format: nutexb.footer.image_format.into(),
         mipmap_levels: some_if_above_one(nutexb.footer.mipmap_count),
         array_layers: some_if_above_one(nutexb.footer.layer_count),
-        caps2: None,
+        caps2: if nutexb.footer.depth > 1 {
+            Some(Caps2::VOLUME)
+        } else {
+            None
+        },
         is_cubemap: nutexb.footer.layer_count == 6,
-        resource_dimension: ddsfile::D3D10ResourceDimension::Texture2D, // TODO: 3D for depth?
-        alpha_mode: ddsfile::AlphaMode::Unknown,
+        resource_dimension: if nutexb.footer.depth > 1 {
+            D3D10ResourceDimension::Texture3D
+        } else {
+            D3D10ResourceDimension::Texture2D
+        },
+        alpha_mode: AlphaMode::Unknown, // TODO: Alpha mode?
     })
     .unwrap();
 
