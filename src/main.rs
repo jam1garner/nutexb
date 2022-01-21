@@ -1,10 +1,8 @@
 fn main() {
-    // TODO: Print usage and add better argument handling.
     let args: Vec<String> = std::env::args().collect();
     let input_image_path = std::path::Path::new(&args[1]);
     let output_nutex_path = std::path::Path::new(&args[2]);
 
-    // TODO: Add meaningful error messages.
     let output_name = output_nutex_path.file_name().unwrap().to_str().unwrap();
     let output_file = std::fs::File::create(output_nutex_path).unwrap();
     let mut output_file = std::io::BufWriter::new(output_file);
@@ -18,7 +16,7 @@ fn main() {
         }
         "nutexb" => {
             let nutexb = nutexb::NutexbFile::read_from_file(input_image_path).unwrap();
-            let dds = nutexb::create_dds(&nutexb);
+            let dds = nutexb::create_dds(&nutexb).unwrap();
             dds.write(&mut output_file).unwrap();
         }
         _ => {

@@ -3,7 +3,7 @@ use std::{
     error::Error,
 };
 
-use ddsfile::{AlphaMode, Caps2, D3D10ResourceDimension, Dds, DxgiFormat, MiscFlag, NewDxgiParams};
+use ddsfile::{AlphaMode, Caps2, D3D10ResourceDimension, Dds, DxgiFormat, NewDxgiParams};
 
 use crate::{NutexbFile, NutexbFormat, ToNutexb};
 
@@ -49,7 +49,7 @@ impl TryFrom<DxgiFormat> for NutexbFormat {
     type Error = String;
 
     fn try_from(value: DxgiFormat) -> Result<Self, Self::Error> {
-        // DDS supports all the known nutexb formats.
+        // DXGI DDS supports all the known nutexb formats.
         match value {
             DxgiFormat::R8_UNorm => Ok(NutexbFormat::R8Unorm),
             DxgiFormat::R8G8B8A8_UNorm => Ok(NutexbFormat::R8G8B8A8Unorm),
@@ -72,7 +72,7 @@ impl TryFrom<DxgiFormat> for NutexbFormat {
             DxgiFormat::BC7_UNorm => Ok(NutexbFormat::BC7Unorm),
             DxgiFormat::BC7_UNorm_sRGB => Ok(NutexbFormat::BC7Srgb),
             _ => Err(format!(
-                "{:?} is not a supported Nutexb image format.",
+                "DDS DXGI format {:?} does not have a corresponding Nutexb format.",
                 value
             )),
         }
@@ -106,15 +106,9 @@ impl From<NutexbFormat> for DxgiFormat {
     }
 }
 
-// TODO: Support D3D format types as well?
-
-pub fn create_dds(nutexb: &NutexbFile) -> Dds {
-    // TODO: 3D Support.
-    // We don't actually need to set the array count here.
-    // Cube maps are set using the appropriate flag.
-    // Setting both the flag and arrays would create an array of 6 cube maps.
-    // TODO: ddsfile has no way of reading this flag?
+pub fn create_dds(nutexb: &NutexbFile) -> Result<Dds, Box<dyn Error>> {
     let some_if_above_one = |x| if x > 0 { Some(x) } else { None };
+
     let mut dds = Dds::new_dxgi(NewDxgiParams {
         height: nutexb.footer.height,
         width: nutexb.footer.width,
@@ -138,7 +132,7 @@ pub fn create_dds(nutexb: &NutexbFile) -> Dds {
     .unwrap();
 
     // DDS stores mipmaps in a contiguous region of memory.
-    dds.data = nutexb.deswizzled_data();
+    dds.data = nutexb.deswizzled_data()?;
 
-    dds
+    Ok(dds)
 }

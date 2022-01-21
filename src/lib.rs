@@ -26,13 +26,13 @@ nutexb.write(&mut writer)?;
 ```
  */
 use binrw::{binrw, prelude::*, NullString, ReadOptions, VecArgs};
-use mipmaps::{deswizzle_data, swizzle_data};
 use std::{
-    cmp::max,
     error::Error,
     io::{Cursor, Read, Seek, SeekFrom, Write},
+    num::NonZeroUsize,
 };
-use tegra_swizzle::div_round_up;
+use surface::deswizzle_data;
+use tegra_swizzle::surface::BlockDim;
 
 // TODO: Make dds support optional.
 pub use ddsfile;
@@ -40,11 +40,14 @@ mod dds;
 
 pub use dds::create_dds;
 
+mod convert;
+pub use convert::*;
+
 // TODO: make image support optional.
 pub use image;
 mod rgbaimage;
 
-mod mipmaps;
+mod surface;
 
 const FOOTER_SIZE: usize = 112;
 const LAYER_MIPMAPS_SIZE: usize = 64;
@@ -126,19 +129,18 @@ impl NutexbFile {
         self.write_to(writer).map_err(Into::into)
     }
 
-    pub fn deswizzled_data(&self) -> Vec<u8> {
+    pub fn deswizzled_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
         deswizzle_data(
             self.footer.width as usize,
             self.footer.height as usize,
             self.footer.depth as usize,
-            self.footer.image_format.block_width() as usize,
-            self.footer.image_format.block_height() as usize,
-            self.footer.image_format.block_depth() as usize,
+            self.footer.image_format.block_dim(),
             self.footer.image_format.bytes_per_pixel() as usize,
             &self.data,
             self.footer.mipmap_count as usize,
             self.footer.layer_count as usize,
         )
+        .map_err(Into::into)
     }
 }
 
@@ -308,217 +310,12 @@ impl NutexbFormat {
         // All known nutexb formats use 2D blocks.
         1
     }
-}
 
-// TODO: It should be possible to make a NutexbFile from anything that is ToNutexb.
-// This avoids having to write the data somewhere.
-
-/// A trait for creating a Nutexb from unswizzled image data.
-/// Implement this trait for an image type to support writing a nutexb file with [write_nutexb].
-pub trait ToNutexb {
-    fn width(&self) -> u32;
-
-    fn height(&self) -> u32;
-
-    fn depth(&self) -> u32;
-
-    /// The raw image data for each layer and mipmap before applying any swizzling.
-    fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>>;
-
-    // TODO: Add an option to generate mipmaps?
-    fn mipmap_count(&self) -> u32;
-
-    fn layer_count(&self) -> u32;
-
-    fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
-}
-
-// TODO: Do we need these write functions?
-/// Creates a [NutexbFile] with the nutexb string set to `name` and writes its data to `writer`.
-pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
-    name: S,
-    image: &N,
-    writer: &mut W,
-) -> Result<(), Box<dyn Error>> {
-    create_nutexb(image, name)?.write(writer)
-}
-
-/// Creates a [NutexbFile] from `image` with the nutexb string set to `name`.
-/// The result of [ToNutexb::mipmaps] is swizzled according to the specified dimensions and format.
-pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
-    image: &N,
-    name: S,
-) -> Result<NutexbFile, Box<dyn Error>> {
-    let width = image.width();
-    let height = image.height();
-    let depth = image.depth();
-
-    let image_format = image.image_format()?;
-    let bytes_per_pixel = image_format.bytes_per_pixel();
-    let block_width = image_format.block_width();
-    let block_height = image_format.block_height();
-    let block_depth = image_format.block_depth();
-
-    let image_data = image.image_data()?;
-
-    let mip_count = image.mipmap_count();
-
-    let layer_count = image.layer_count();
-
-    let layer_mipmaps = calculate_layer_mip_sizes(
-        width,
-        height,
-        depth,
-        block_width,
-        block_height,
-        block_depth,
-        bytes_per_pixel,
-        mip_count,
-        layer_count,
-    );
-
-    let data = swizzle_data(
-        width as usize,
-        height as usize,
-        depth as usize,
-        block_width as usize,
-        block_height as usize,
-        block_depth as usize,
-        bytes_per_pixel as usize,
-        &image_data,
-        mip_count as usize,
-        layer_count as usize,
-    );
-
-    let size = data.len() as u32;
-
-    let unk2 = unk2(depth, layer_count);
-
-    Ok(NutexbFile {
-        data,
-        layer_mipmaps,
-        footer: NutexbFooter {
-            string: NullString::from_string(name.into()),
-            width,
-            height,
-            depth,
-            image_format,
-            unk2,
-            mipmap_count: mip_count,
-            alignment: 0x1000,
-            layer_count,
-            data_size: size,
-            version: (1, 2),
-        },
-    })
-}
-
-fn unk2(depth: u32, layer_count: u32) -> u32 {
-    // TODO: What does this value do?
-    if depth > 1 {
-        8
-    } else if layer_count > 1 {
-        9
-    } else {
-        4
+    pub(crate) fn block_dim(&self) -> BlockDim {
+        BlockDim {
+            width: NonZeroUsize::new(self.block_width() as usize).unwrap(),
+            height: NonZeroUsize::new(self.block_height() as usize).unwrap(),
+            depth: NonZeroUsize::new(self.block_depth() as usize).unwrap(),
+        }
     }
-}
-
-// TODO: Move into tegra_swizzle?
-fn calculate_layer_mip_sizes(
-    width: u32,
-    height: u32,
-    depth: u32,
-    block_width: u32,
-    block_height: u32,
-    block_depth: u32,
-    bytes_per_pixel: u32,
-    mip_count: u32,
-    layer_count: u32,
-) -> Vec<LayerMipmaps> {
-    // Mipmaps are repeated for each layer.
-    let layer = LayerMipmaps {
-        mipmap_sizes: (0..mip_count as usize)
-            .into_iter()
-            .map(|mip| {
-                // Halve width and height for each mip level after the base level.
-                // The minimum mipmap size depends on the format.
-                let mip_width = max(div_round_up(width as usize >> mip, block_width as usize), 1);
-                let mip_height = max(
-                    div_round_up(height as usize >> mip, block_height as usize),
-                    1,
-                );
-                let mip_depth = max(div_round_up(depth as usize >> mip, block_depth as usize), 1);
-
-                let mip_size = mip_width * mip_height * mip_depth * bytes_per_pixel as usize;
-                max(mip_size, bytes_per_pixel as usize) as u32
-            })
-            .collect(),
-    };
-    vec![layer; layer_count as usize]
-}
-
-/// Creates a [NutexbFile] from `image` with the nutexb string set to `name` without any swizzling.
-/// This assumes no layers or mipmaps for `image`.
-/// Prefer [create_nutexb] for better memory access performance in most cases.
-///
-/// Textures created with [create_nutexb] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
-/// This function exists for the rare case where swizzling the image data is not desired for performance or compatibility reasons.
-pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
-    image: &N,
-    name: S,
-) -> Result<NutexbFile, Box<dyn Error>> {
-    let width = image.width();
-    let height = image.height();
-    let depth = image.depth();
-
-    // TODO: Mipmaps
-    let data = image.image_data()?;
-
-    let image_format = image.image_format()?;
-    let bytes_per_pixel = image_format.bytes_per_pixel();
-    let block_width = image_format.block_width();
-    let block_height = image_format.block_height();
-    // TODO: Support 3D textures.
-    let block_depth = image_format.block_depth();
-
-    let layer_mipmaps = calculate_layer_mip_sizes(
-        width,
-        height,
-        depth,
-        block_width,
-        block_height,
-        block_depth,
-        bytes_per_pixel,
-        1,
-        1,
-    );
-
-    let size = data.len() as u32;
-    Ok(NutexbFile {
-        data,
-        layer_mipmaps,
-        footer: NutexbFooter {
-            string: NullString::from_string(name.into()),
-            width,
-            height,
-            depth,
-            image_format,
-            unk2: 2,
-            mipmap_count: 1,
-            alignment: 0,
-            layer_count: 1,
-            data_size: size,
-            version: (2, 0),
-        },
-    })
-}
-
-/// Writes a nutexb without any swizzling.
-pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
-    name: S,
-    image: &N,
-    writer: &mut W,
-) -> Result<(), Box<dyn Error>> {
-    create_nutexb_unswizzled(image, name)?.write(writer)
 }
