@@ -2,34 +2,50 @@
 //! Nutexb is an image texture format used in Super Smash Bros Ultimate and some other games.
 //! The extension ".nutexb" may stand for "Namco Universal Texture Binary".
 //!
-//! Image data is stored in a contiguous region of memory with metadata stored in the [NutexbFooter].
+//! Image data is stored in a contiguous region of memory with metadata stored in the
+//! [layer_mipmaps](struct.NutexbFile.html#structfield.layer_mipmaps) and [footer](struct.NutexbFile.html#structfield.footer).
 //! The supported image formats in [NutexbFormat] use standard compressed and uncompressed formats used for DDS files.
 //! The arrays and mipmaps for the image data are stored in a memory layout optimized for the Tegra X1 in a process known as swizzling.
 //! This library provides tools for reading and writing nutexb files as well as working with the swizzled image data.
 //!
 //! ## Reading
-//!
-//! ## Writing
-//! The easiest way to create a [NutexbFile] is by implementing the [ToNutexb] trait and calling [create_nutexb].
-//! This trait is already implemented for [ddsfile::Dds] and [image::DynamicImage].
+//! Read a [NutexbFile] with [NutexbFile::read] or [NutexbFile::read_from_file].
+//! The image data needs to be deswizzled first with [NutexbFile::deswizzled_data] 
+//! to use with applications that expect a standard row-major memory layout.
 /*!
 ```rust no_run
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
-use nutexb::create_nutexb;
+use nutexb::NutexbFile;
+
+let nutexb = NutexbFile::read_from_file("col_001.nutexb")?;
+let surface_data = nutexb.deswizzled_data();
+# Ok(()) }
+```
+ */
+//!
+//! ## Writing
+//! The easiest way to create a [NutexbFile] is by implementing the [ToNutexb] trait and calling [NutexbFile::create].
+//! This trait is already implemented for DDS and formats supported by image-rs when compiling with
+//! the `"ddsfile"` and `"image"` features, respectively.
+/*!
+```rust no_run
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+use nutexb::NutexbFile;
 
 let image = image::open("col_001.png")?;
-let nutexb = create_nutexb(&image, "col_001")?;
 
-let mut writer = std::io::Cursor::new(Vec::new());
-nutexb.write(&mut writer)?;
+let nutexb = NutexbFile::create(&image, "col_001")?;
+nutexb.write_to_file("col_001.nutexb")?;
 # Ok(()) }
 ```
  */
 use binrw::{binrw, prelude::*, NullString, ReadOptions, VecArgs};
+use convert::{create_nutexb, create_nutexb_unswizzled};
 use std::{
     error::Error,
     io::{Cursor, Read, Seek, SeekFrom, Write},
     num::NonZeroUsize,
+    path::Path,
 };
 use surface::deswizzle_data;
 use tegra_swizzle::surface::BlockDim;
@@ -43,14 +59,14 @@ mod dds;
 #[cfg(feature = "ddsfile")]
 pub use dds::create_dds;
 
-mod convert;
-pub use convert::*;
-
 #[cfg(feature = "image")]
 pub use image;
 
 #[cfg(feature = "image")]
 mod rgbaimage;
+
+mod convert;
+pub use convert::ToNutexb;
 
 mod surface;
 
@@ -79,8 +95,8 @@ impl BinRead for NutexbFile {
 
     fn read_options<R: Read + Seek>(
         reader: &mut R,
-        options: &ReadOptions,
-        args: Self::Args,
+        _options: &ReadOptions,
+        _args: Self::Args,
     ) -> BinResult<Self> {
         // We need the footer to know the size of the layer mipmaps.
         reader.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
@@ -120,7 +136,7 @@ impl NutexbFile {
 
     /// Reads the [NutexbFile] from the specified `path`.
     /// The entire file is buffered to improve performance.
-    pub fn read_from_file<P: AsRef<std::path::Path>>(
+    pub fn read_from_file<P: AsRef<Path>>(
         path: P,
     ) -> Result<NutexbFile, Box<dyn std::error::Error>> {
         let mut file = Cursor::new(std::fs::read(path)?);
@@ -133,6 +149,15 @@ impl NutexbFile {
         self.write_to(writer).map_err(Into::into)
     }
 
+    /// Writes the [NutexbFile] to the specified `path`.
+    /// The entire file is buffered to improve performance.
+    pub fn write_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
+        let mut writer = Cursor::new(Vec::new());
+        self.write_to(&mut writer)?;
+        std::fs::write(path, writer.into_inner()).map_err(Into::into)
+    }
+
+    /// Deswizzles all the layers and mipmaps in [data](#structfield.data).
     pub fn deswizzled_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
         deswizzle_data(
             self.footer.width as usize,
@@ -145,6 +170,28 @@ impl NutexbFile {
             self.footer.layer_count as usize,
         )
         .map_err(Into::into)
+    }
+
+    /// Creates a [NutexbFile] from `image` with the nutexb string set to `name`.
+    /// The result of [ToNutexb::image_data] is swizzled according to the specified dimensions and format.
+    pub fn create<N: ToNutexb, S: Into<String>>(
+        image: &N,
+        name: S,
+    ) -> Result<Self, Box<dyn Error>> {
+        create_nutexb(image, name)
+    }
+
+    /// Creates a [NutexbFile] from `image` with the nutexb string set to `name` without any swizzling.
+    /// This assumes no layers or mipmaps for `image`.
+    /// Prefer [NutexbFile::create] for better memory access performance in most cases.
+    ///
+    /// Textures created with [NutexbFile::create] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
+    /// This function exists for the rare case where swizzling the image data is not desired for performance or compatibility reasons.
+    pub fn create_unswizzled<N: ToNutexb, S: Into<String>>(
+        image: &N,
+        name: S,
+    ) -> Result<Self, Box<dyn Error>> {
+        create_nutexb_unswizzled(image, name)
     }
 }
 
@@ -169,7 +216,7 @@ pub struct NutexbFooter {
     pub unk2: u32, // TODO: Some kind of flags?
     /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
     pub mipmap_count: u32,
-    pub alignment: u32, // TODO: Fix this field name
+    pub unk3: u32,
     /// The number of texture layers in [data](struct.NutexbFile.html#structfield.data). This is 6 for cubemaps and 1 otherwise.
     pub layer_count: u32,
     /// The size in bytes of [data](struct.NutexbFile.html#structfield.data).
@@ -191,11 +238,10 @@ pub struct LayerMipmaps {
 /// Supported image data formats.
 ///
 /// These formats have a corresponding format in modern versions of graphics APIs like OpenGL, Vulkan, etc.
-/// Most of the compressed formats are supported by [Dds](ddsfile::Dds).
+/// Most of the formats are supported by DDS.
 ///
 /// In some contexts, "Unorm" is called "linear" or expanded to "unsigned normalized".
 /// "U" and "S" prefixes refer to "unsigned" and "signed" data, respectively.
-///
 /// Variants with "Srgb" store identical data as "Unorm" variants but signal to the graphics API to
 /// convert from sRGB to linear gamma when accessing texture data.
 // TODO: It's possible this is some sort of flags.
@@ -226,8 +272,9 @@ pub enum NutexbFormat {
 }
 
 impl NutexbFormat {
-    /// The number of bytes to store a single pixel.
+    /// The number of bytes toalignment:  stunk3gle pixel.
     /// For block compressed formats like [NutexbFormat::BC7Srgb], this is the size in bytes of a single block.
+    /// # Examples
     /**
     ```rust
     # use nutexb::NutexbFormat;

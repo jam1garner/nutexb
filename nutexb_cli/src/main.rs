@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use nutexb::NutexbFile;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let input_path = Path::new(&args[1]);
@@ -14,8 +16,8 @@ fn main() {
     };
     let output_path = args
         .get(2)
-        .map(|a| PathBuf::from(a))
-        .unwrap_or(input_path.with_extension(new_extension));
+        .map(PathBuf::from)
+        .unwrap_or_else(|| input_path.with_extension(new_extension));
 
     let output_name = output_path.file_name().unwrap().to_str().unwrap();
     let output_file = File::create(&output_path).unwrap();
@@ -26,7 +28,8 @@ fn main() {
         "dds" => {
             let mut reader = File::open(input_path).unwrap();
             let dds = nutexb::ddsfile::Dds::read(&mut reader).unwrap();
-            nutexb::write_nutexb(output_name, &dds, &mut output_file).unwrap();
+            let nutexb = NutexbFile::create(&dds, output_name).unwrap();
+            nutexb.write_to_file(output_path).unwrap();
         }
         "nutexb" => {
             let nutexb = nutexb::NutexbFile::read_from_file(input_path).unwrap();
@@ -35,7 +38,8 @@ fn main() {
         }
         _ => {
             let image = nutexb::image::open(input_path).unwrap();
-            nutexb::write_nutexb(output_name, &image, &mut output_file).unwrap();
+            let nutexb = NutexbFile::create(&image, output_name).unwrap();
+            nutexb.write_to_file(output_path).unwrap();
         }
     }
     println!("Completed operation in {:?}", start.elapsed());

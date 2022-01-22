@@ -1,47 +1,36 @@
 use crate::{surface::swizzle_data, LayerMipmaps, NutexbFile, NutexbFooter, NutexbFormat};
 use binrw::NullString;
-use std::{
-    cmp::max,
-    error::Error,
-    io::{Seek, Write},
-};
+use std::{cmp::max, error::Error};
 use tegra_swizzle::{div_round_up, surface::BlockDim};
 
-// TODO: It should be possible to make a NutexbFile from anything that is ToNutexb.
-// This avoids having to write the data somewhere.
-
 /// A trait for creating a Nutexb from unswizzled image data.
-/// Implement this trait for an image type to support writing a nutexb file with [write_nutexb].
+/// Implement this trait for an image file format to support creating a [NutexbFile] with [NutexbFile::create].
 pub trait ToNutexb {
+    /// The width of the image in pixels.
     fn width(&self) -> u32;
 
+    /// The height of the image in pixels.
     fn height(&self) -> u32;
 
+    /// The depth of the image in pixels. This should be `1` for 2D textures.
     fn depth(&self) -> u32;
 
     /// The raw image data for each layer and mipmap before applying any swizzling.
+    /// Data should be arranged in row-major order with no padding between arrays and mipmaps.
+    /// See [tegra_swizzle::surface] for details.
     fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>>;
 
     // TODO: Add an option to generate mipmaps?
+    /// The number of mipmaps or `1` to indicate no mipmaps.
     fn mipmap_count(&self) -> u32;
 
+    /// The number of array layers or `1` to indicate no layers.
+    /// This should be `6` for cube maps.
     fn layer_count(&self) -> u32;
 
     fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>>;
 }
 
-// TODO: Do we need these write functions?
-/// Creates a [NutexbFile] with the nutexb string set to `name` and writes its data to `writer`.
-pub fn write_nutexb<W: Write + Seek, S: Into<String>, N: ToNutexb>(
-    name: S,
-    image: &N,
-    writer: &mut W,
-) -> Result<(), Box<dyn Error>> {
-    create_nutexb(image, name)?.write(writer)
-}
-
-/// Creates a [NutexbFile] from `image` with the nutexb string set to `name`.
-/// The result of [ToNutexb::mipmaps] is swizzled according to the specified dimensions and format.
 pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
     image: &N,
     name: S,
@@ -96,7 +85,7 @@ pub fn create_nutexb<N: ToNutexb, S: Into<String>>(
             image_format,
             unk2,
             mipmap_count: mip_count,
-            alignment: 0x1000,
+            unk3: 0x1000,
             layer_count,
             data_size: size,
             version: (1, 2),
@@ -144,12 +133,6 @@ fn calculate_layer_mip_sizes(
     vec![layer; layer_count]
 }
 
-/// Creates a [NutexbFile] from `image` with the nutexb string set to `name` without any swizzling.
-/// This assumes no layers or mipmaps for `image`.
-/// Prefer [create_nutexb] for better memory access performance in most cases.
-///
-/// Textures created with [create_nutexb] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
-/// This function exists for the rare case where swizzling the image data is not desired for performance or compatibility reasons.
 pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
     image: &N,
     name: S,
@@ -158,7 +141,7 @@ pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
     let height = image.height();
     let depth = image.depth();
 
-    // TODO: Mipmaps
+    // TODO: Mipmaps and array layers?
     let data = image.image_data()?;
 
     let image_format = image.image_format()?;
@@ -187,19 +170,10 @@ pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
             image_format,
             unk2: 2,
             mipmap_count: 1,
-            alignment: 0,
+            unk3: 0,
             layer_count: 1,
             data_size: size,
             version: (2, 0),
         },
     })
-}
-
-/// Writes a nutexb without any swizzling.
-pub fn write_nutexb_unswizzled<W: Write + Seek, S: Into<String>, N: ToNutexb>(
-    name: S,
-    image: &N,
-    writer: &mut W,
-) -> Result<(), Box<dyn Error>> {
-    create_nutexb_unswizzled(image, name)?.write(writer)
 }
