@@ -34,17 +34,22 @@ use std::{
 use surface::deswizzle_data;
 use tegra_swizzle::surface::BlockDim;
 
-// TODO: Make dds support optional.
+#[cfg(feature = "ddsfile")]
 pub use ddsfile;
+
+#[cfg(feature = "ddsfile")]
 mod dds;
 
+#[cfg(feature = "ddsfile")]
 pub use dds::create_dds;
 
 mod convert;
 pub use convert::*;
 
-// TODO: make image support optional.
+#[cfg(feature = "image")]
 pub use image;
+
+#[cfg(feature = "image")]
 mod rgbaimage;
 
 mod surface;
@@ -53,7 +58,6 @@ const FOOTER_SIZE: usize = 112;
 const LAYER_MIPMAPS_SIZE: usize = 64;
 
 /// The data stored in a nutexb file like `"def_001_col.nutexb"`.
-// TODO: Alignment requirements for the data or file length?
 #[derive(Debug, Clone, BinWrite)]
 pub struct NutexbFile {
     /// Combined image data for all array and mipmap levels.
@@ -195,8 +199,7 @@ pub struct LayerMipmaps {
 /// Variants with "Srgb" store identical data as "Unorm" variants but signal to the graphics API to
 /// convert from sRGB to linear gamma when accessing texture data.
 // TODO: It's possible this is some sort of flags.
-// num channels, format, type (srgb, unorm, etc)?
-// TODO: Add these as methods?
+// ex: num channels, format, type (srgb, unorm, etc)?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BinRead, BinWrite)]
 #[brw(repr(u32))]
 pub enum NutexbFormat {

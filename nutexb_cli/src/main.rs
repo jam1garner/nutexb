@@ -34,7 +34,7 @@ fn main() {
             dds.write(&mut output_file).unwrap();
         }
         _ => {
-            let image = image::open(input_path).unwrap();
+            let image = nutexb::image::open(input_path).unwrap();
             nutexb::write_nutexb(output_name, &image, &mut output_file).unwrap();
         }
     }
