@@ -170,7 +170,7 @@ pub fn create_nutexb_unswizzled<N: ToNutexb, S: Into<String>>(
             image_format,
             unk2: 2,
             mipmap_count: 1,
-            unk3: 0,
+            unk3: 0, // TODO: toggles swizzling?
             layer_count: 1,
             data_size: size,
             version: (2, 0),

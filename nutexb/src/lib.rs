@@ -10,7 +10,7 @@
 //!
 //! ## Reading
 //! Read a [NutexbFile] with [NutexbFile::read] or [NutexbFile::read_from_file].
-//! The image data needs to be deswizzled first with [NutexbFile::deswizzled_data] 
+//! The image data needs to be deswizzled first with [NutexbFile::deswizzled_data]
 //! to use with applications that expect a standard row-major memory layout.
 /*!
 ```rust no_run
@@ -48,7 +48,7 @@ use std::{
     path::Path,
 };
 use surface::deswizzle_data;
-use tegra_swizzle::surface::BlockDim;
+use tegra_swizzle::surface::{deswizzled_surface_size, swizzled_surface_size, BlockDim};
 
 #[cfg(feature = "ddsfile")]
 pub use ddsfile;
@@ -76,8 +76,7 @@ const LAYER_MIPMAPS_SIZE: usize = 64;
 /// The data stored in a nutexb file like `"def_001_col.nutexb"`.
 #[derive(Debug, Clone, BinWrite)]
 pub struct NutexbFile {
-    /// Combined image data for all array and mipmap levels.
-    // Use a custom parser since we don't know the length yet.
+    /// Combined image data for all array layer and mipmap levels.
     pub data: Vec<u8>,
 
     /// The size of the mipmaps for each array layer.
@@ -90,6 +89,7 @@ pub struct NutexbFile {
     pub footer: NutexbFooter,
 }
 
+// Use a custom parser since we don't know the data size until finding the footer.
 impl BinRead for NutexbFile {
     type Args = ();
 
@@ -193,6 +193,40 @@ impl NutexbFile {
     ) -> Result<Self, Box<dyn Error>> {
         create_nutexb_unswizzled(image, name)
     }
+
+    /// Resizes the image data to the expected size based on the [footer](#structfield.footer) information by truncating or padding with zeros.
+    ///
+    /// Calling this method is unnecessary for nutexbs created with [NutexbFile::create] or [NutexbFile::create_unswizzled].
+    /// These methods already calculate the appropriate image data size.
+    pub fn optimize_size(&mut self) {
+        let new_len = if self.footer.unk3 == 0x1000 {
+            swizzled_surface_size(
+                self.footer.width as usize,
+                self.footer.height as usize,
+                self.footer.depth as usize,
+                self.footer.image_format.block_dim(),
+                None,
+                self.footer.image_format.bytes_per_pixel() as usize,
+                self.footer.mipmap_count as usize,
+                self.footer.layer_count as usize,
+            )
+        } else {
+            // Not all nutexbs store swizzled surfaces.
+            deswizzled_surface_size(
+                self.footer.width as usize,
+                self.footer.height as usize,
+                self.footer.depth as usize,
+                self.footer.image_format.block_dim(),
+                self.footer.image_format.bytes_per_pixel() as usize,
+                self.footer.mipmap_count as usize,
+                self.footer.layer_count as usize,
+            )
+        };
+
+        // Remove padding and align the surface to the appropriate size.
+        self.data.resize(new_len, 0);
+        self.footer.data_size = self.data.len() as u32;
+    }
 }
 
 /// Information about the image data.
@@ -216,6 +250,7 @@ pub struct NutexbFooter {
     pub unk2: u32, // TODO: Some kind of flags?
     /// The number of mipmaps in [data](struct.NutexbFile.html#structfield.data) or 1 for no mipmapping.
     pub mipmap_count: u32,
+    /// `0x1000` for nutexbs with swizzling and `0` otherwise
     pub unk3: u32,
     /// The number of texture layers in [data](struct.NutexbFile.html#structfield.data). This is 6 for cubemaps and 1 otherwise.
     pub layer_count: u32,
@@ -225,6 +260,7 @@ pub struct NutexbFooter {
     pub version: (u16, u16),
 }
 
+/// The mipmap sizes for each array layer.
 #[binrw]
 #[derive(Debug, Clone)]
 #[br(import(mipmap_count: u32))]
@@ -238,12 +274,11 @@ pub struct LayerMipmaps {
 /// Supported image data formats.
 ///
 /// These formats have a corresponding format in modern versions of graphics APIs like OpenGL, Vulkan, etc.
-/// Most of the formats are supported by DDS.
+/// All known [NutexbFormat] are supported by DDS DXGI formats.
 ///
 /// In some contexts, "Unorm" is called "linear" or expanded to "unsigned normalized".
 /// "U" and "S" prefixes refer to "unsigned" and "signed" data, respectively.
-/// Variants with "Srgb" store identical data as "Unorm" variants but signal to the graphics API to
-/// convert from sRGB to linear gamma when accessing texture data.
+/// "Srgb", "Unorm", and "Snorm" variants use the same data format but use different conversions to floating point when accessed by a GPU shader.
 // TODO: It's possible this is some sort of flags.
 // ex: num channels, format, type (srgb, unorm, etc)?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BinRead, BinWrite)]
@@ -272,7 +307,7 @@ pub enum NutexbFormat {
 }
 
 impl NutexbFormat {
-    /// The number of bytes toalignment:  stunk3gle pixel.
+    /// The number of bytes per pixel.
     /// For block compressed formats like [NutexbFormat::BC7Srgb], this is the size in bytes of a single block.
     /// # Examples
     /**
