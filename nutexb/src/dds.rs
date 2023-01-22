@@ -3,7 +3,9 @@ use std::{
     error::Error,
 };
 
-use ddsfile::{AlphaMode, Caps2, D3D10ResourceDimension, Dds, DxgiFormat, NewDxgiParams};
+use ddsfile::{
+    AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, FourCC, NewDxgiParams,
+};
 
 use crate::{NutexbFile, NutexbFormat, ToNutexb};
 
@@ -39,9 +41,25 @@ impl ToNutexb for ddsfile::Dds {
     }
 
     fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
-        // TODO: Try dxgi format, then try d3d, then error?
-        let format = self.get_dxgi_format().unwrap().try_into()?;
-        Ok(format)
+        // The format can be DXGI, D3D, or specified in the FOURCC.
+        // Checking FOURCC is necessary for compatibility with some applications.
+        self.get_dxgi_format()
+            .ok_or_else(|| "Missing DXGI format.".to_owned())
+            .and_then(|dxgi| dxgi.try_into())
+            .or_else(|_| {
+                self.get_d3d_format()
+                    .ok_or_else(|| "Missing D3D format.".to_owned())
+                    .and_then(|d3d| d3d.try_into())
+            })
+            .or_else(|_| {
+                self.header
+                    .spf
+                    .fourcc
+                    .as_ref()
+                    .ok_or_else(|| "Missing FOURCC.".to_owned())
+                    .and_then(|fourcc| fourcc.clone().try_into())
+            })
+            .map_err(Into::into)
     }
 }
 
@@ -74,6 +92,49 @@ impl TryFrom<DxgiFormat> for NutexbFormat {
             _ => Err(format!(
                 "DDS DXGI format {:?} does not have a corresponding Nutexb format.",
                 value
+            )),
+        }
+    }
+}
+
+impl TryFrom<D3DFormat> for NutexbFormat {
+    type Error = String;
+
+    fn try_from(value: D3DFormat) -> Result<Self, Self::Error> {
+        match value {
+            D3DFormat::DXT1 => Ok(Self::BC1Unorm),
+            D3DFormat::DXT2 => Ok(Self::BC2Unorm),
+            D3DFormat::DXT3 => Ok(Self::BC2Unorm),
+            D3DFormat::DXT4 => Ok(Self::BC3Unorm),
+            D3DFormat::DXT5 => Ok(Self::BC3Unorm),
+            _ => Err(format!(
+                "DDS D3D format {:?} does not have a corresponding Nutexb format.",
+                value
+            )),
+        }
+    }
+}
+
+const BC5U: u32 = u32::from_le_bytes(*b"BC5U");
+const ATI2: u32 = u32::from_le_bytes(*b"ATI2");
+
+impl TryFrom<FourCC> for NutexbFormat {
+    type Error = String;
+
+    fn try_from(fourcc: FourCC) -> Result<Self, Self::Error> {
+        match fourcc.0 {
+            FourCC::DXT1 => Ok(Self::BC1Unorm),
+            FourCC::DXT2 => Ok(Self::BC2Unorm),
+            FourCC::DXT3 => Ok(Self::BC2Unorm),
+            FourCC::DXT4 => Ok(Self::BC3Unorm),
+            FourCC::DXT5 => Ok(Self::BC3Unorm),
+            FourCC::BC4_UNORM => Ok(Self::BC4Unorm),
+            FourCC::BC4_SNORM => Ok(Self::BC4Snorm),
+            ATI2 | BC5U => Ok(Self::BC5Unorm),
+            FourCC::BC5_SNORM => Ok(Self::BC5Snorm),
+            _ => Err(format!(
+                "DDS FOURCC {:x?} does not have a corresponding Nutexb format.",
+                fourcc.0
             )),
         }
     }
