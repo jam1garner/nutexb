@@ -7,60 +7,50 @@ use ddsfile::{
     AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, FourCC, NewDxgiParams,
 };
 
-use crate::{NutexbFile, NutexbFormat, ToNutexb};
+use crate::{NutexbFile, NutexbFormat, Surface};
 
-impl ToNutexb for ddsfile::Dds {
-    fn width(&self) -> u32 {
-        self.get_width()
-    }
+pub fn create_surface(dds: &Dds) -> Result<Surface<&[u8]>, Box<dyn Error>> {
+    Ok(Surface {
+        width: dds.get_width(),
+        height: dds.get_height(),
+        depth: dds.get_depth(),
+        image_data: &dds.data,
+        mipmap_count: dds.get_num_mipmap_levels(),
+        layer_count: layer_count(dds),
+        image_format: image_format(dds)?,
+    })
+}
 
-    fn height(&self) -> u32 {
-        self.get_height()
+fn layer_count(dds: &Dds) -> u32 {
+    // Array layers for DDS are calculated differently for cube maps.
+    if matches!(&dds.header10, Some(header10) if header10.misc_flag == ddsfile::MiscFlag::TEXTURECUBE)
+    {
+        dds.get_num_array_layers() * 6
+    } else {
+        dds.get_num_array_layers()
     }
+}
 
-    fn depth(&self) -> u32 {
-        self.get_depth()
-    }
-
-    fn image_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
-        Ok(self.data.clone())
-    }
-
-    fn mipmap_count(&self) -> u32 {
-        self.get_num_mipmap_levels()
-    }
-
-    fn layer_count(&self) -> u32 {
-        // Array layers for DDS are calculated differently for cube maps.
-        if matches!(&self.header10, Some(header10) if header10.misc_flag == ddsfile::MiscFlag::TEXTURECUBE)
-        {
-            self.get_num_array_layers() * 6
-        } else {
-            self.get_num_array_layers()
-        }
-    }
-
-    fn image_format(&self) -> Result<NutexbFormat, Box<dyn Error>> {
-        // The format can be DXGI, D3D, or specified in the FOURCC.
-        // Checking FOURCC is necessary for compatibility with some applications.
-        self.get_dxgi_format()
-            .ok_or_else(|| "Missing DXGI format.".to_owned())
-            .and_then(|dxgi| dxgi.try_into())
-            .or_else(|_| {
-                self.get_d3d_format()
-                    .ok_or_else(|| "Missing D3D format.".to_owned())
-                    .and_then(|d3d| d3d.try_into())
-            })
-            .or_else(|_| {
-                self.header
-                    .spf
-                    .fourcc
-                    .as_ref()
-                    .ok_or_else(|| "Missing FOURCC.".to_owned())
-                    .and_then(|fourcc| fourcc.clone().try_into())
-            })
-            .map_err(Into::into)
-    }
+fn image_format(dds: &Dds) -> Result<NutexbFormat, Box<dyn Error>> {
+    // The format can be DXGI, D3D, or specified in the FOURCC.
+    // Checking FOURCC is necessary for compatibility with some applications.
+    dds.get_dxgi_format()
+        .ok_or_else(|| "Missing DXGI format.".to_owned())
+        .and_then(|dxgi| dxgi.try_into())
+        .or_else(|_| {
+            dds.get_d3d_format()
+                .ok_or_else(|| "Missing D3D format.".to_owned())
+                .and_then(|d3d| d3d.try_into())
+        })
+        .or_else(|_| {
+            dds.header
+                .spf
+                .fourcc
+                .as_ref()
+                .ok_or_else(|| "Missing FOURCC.".to_owned())
+                .and_then(|fourcc| fourcc.clone().try_into())
+        })
+        .map_err(Into::into)
 }
 
 impl TryFrom<DxgiFormat> for NutexbFormat {
@@ -167,7 +157,7 @@ impl From<NutexbFormat> for DxgiFormat {
     }
 }
 
-pub fn create_dds(nutexb: &NutexbFile) -> Result<Dds, Box<dyn Error>> {
+pub fn create_dds(nutexb: &NutexbFile) -> Result<Dds, tegra_swizzle::SwizzleError> {
     let some_if_above_one = |x| if x > 0 { Some(x) } else { None };
 
     let mut dds = Dds::new_dxgi(NewDxgiParams {

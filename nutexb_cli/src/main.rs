@@ -28,17 +28,17 @@ fn main() {
         "dds" => {
             let mut reader = File::open(input_path).unwrap();
             let dds = nutexb::ddsfile::Dds::read(&mut reader).unwrap();
-            let nutexb = NutexbFile::create(&dds, output_name).unwrap();
+            let nutexb = NutexbFile::from_dds(&dds, output_name).unwrap();
             nutexb.write_to_file(output_path).unwrap();
         }
         "nutexb" => {
             let nutexb = nutexb::NutexbFile::read_from_file(input_path).unwrap();
-            let dds = nutexb::create_dds(&nutexb).unwrap();
+            let dds = nutexb.to_dds().unwrap();
             dds.write(&mut output_file).unwrap();
         }
         _ => {
             let image = nutexb::image::open(input_path).unwrap();
-            let nutexb = NutexbFile::create(&image, output_name).unwrap();
+            let nutexb = NutexbFile::from_image(&image.to_rgba8(), output_name).unwrap();
             nutexb.write_to_file(output_path).unwrap();
         }
     }

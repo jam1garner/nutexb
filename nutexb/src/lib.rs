@@ -24,9 +24,9 @@ let surface_data = nutexb.deswizzled_data();
  */
 //!
 //! ## Writing
-//! The easiest way to create a [NutexbFile] is by implementing the [ToNutexb] trait and calling [NutexbFile::create].
-//! This trait is already implemented for DDS and formats supported by image-rs when compiling with
-//! the `"ddsfile"` and `"image"` features, respectively.
+//! The easiest way to create a [NutexbFile] is by calling [NutexbFile::from_dds] and
+//! [NutexbFile::from_image] when using the `"ddsfile"` and `"image"` features, respectively.
+//! For manually specifying the surface dimensions and data, use [NutexbFile::from_surface].
 /*!
 ```rust no_run
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,7 +34,19 @@ use nutexb::NutexbFile;
 
 let image = image::open("col_001.png")?;
 
-let nutexb = NutexbFile::create(&image, "col_001")?;
+let nutexb = NutexbFile::from_image(&image.to_rgba8(), "col_001")?;
+nutexb.write_to_file("col_001.nutexb")?;
+# Ok(()) }
+```
+
+```rust no_run
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+use nutexb::NutexbFile;
+
+let mut reader = std::io::BufReader::new(std::fs::File::open("cube.dds")?);
+let dds = ddsfile::Dds::read(&mut reader)?;
+
+let nutexb = NutexbFile::from_dds(&dds, "cube")?;
 nutexb.write_to_file("col_001.nutexb")?;
 # Ok(()) }
 ```
@@ -47,7 +59,6 @@ use std::{
     num::NonZeroUsize,
     path::Path,
 };
-use surface::deswizzle_data;
 use tegra_swizzle::surface::{deswizzled_surface_size, swizzled_surface_size, BlockDim};
 
 #[cfg(feature = "ddsfile")]
@@ -56,19 +67,11 @@ pub use ddsfile;
 #[cfg(feature = "ddsfile")]
 mod dds;
 
-#[cfg(feature = "ddsfile")]
-pub use dds::create_dds;
-
 #[cfg(feature = "image")]
 pub use image;
 
-#[cfg(feature = "image")]
-mod rgbaimage;
-
 mod convert;
-pub use convert::ToNutexb;
-
-mod surface;
+pub use convert::Surface;
 
 const FOOTER_SIZE: usize = 112;
 const LAYER_MIPMAPS_SIZE: usize = 64;
@@ -138,65 +141,99 @@ impl NutexbFile {
     /// The entire file is buffered to improve performance.
     pub fn read_from_file<P: AsRef<Path>>(
         path: P,
-    ) -> Result<NutexbFile, Box<dyn std::error::Error>> {
+    ) -> Result<NutexbFile, binrw::Error> {
         let mut file = Cursor::new(std::fs::read(path)?);
         let nutexb = file.read_le::<NutexbFile>()?;
         Ok(nutexb)
     }
 
     /// Writes the [NutexbFile] to the specified `writer`.
-    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> Result<(), Box<dyn Error>> {
+    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> Result<(), binrw::Error> {
         self.write_to(writer).map_err(Into::into)
     }
 
     /// Writes the [NutexbFile] to the specified `path`.
     /// The entire file is buffered to improve performance.
-    pub fn write_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
+    pub fn write_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), binrw::Error> {
         let mut writer = Cursor::new(Vec::new());
         self.write_to(&mut writer)?;
         std::fs::write(path, writer.into_inner()).map_err(Into::into)
     }
 
     /// Deswizzles all the layers and mipmaps in [data](#structfield.data).
-    pub fn deswizzled_data(&self) -> Result<Vec<u8>, Box<dyn Error>> {
-        deswizzle_data(
+    pub fn deswizzled_data(&self) -> Result<Vec<u8>, tegra_swizzle::SwizzleError> {
+        tegra_swizzle::surface::deswizzle_surface(
             self.footer.width as usize,
             self.footer.height as usize,
             self.footer.depth as usize,
-            self.footer.image_format.block_dim(),
-            self.footer.image_format.bytes_per_pixel() as usize,
             &self.data,
+            self.footer.image_format.block_dim(),
+            None,
+            self.footer.image_format.bytes_per_pixel() as usize,
             self.footer.mipmap_count as usize,
             self.footer.layer_count as usize,
         )
-        .map_err(Into::into)
     }
 
     /// Creates a [NutexbFile] from `image` with the nutexb string set to `name`.
-    /// The result of [ToNutexb::image_data] is swizzled according to the specified dimensions and format.
-    pub fn create<N: ToNutexb, S: Into<String>>(
-        image: &N,
+    /// The data in `image` is swizzled according to the specified dimensions and format.
+    pub fn from_surface<T: AsRef<[u8]>, S: Into<String>>(
+        image: Surface<T>,
         name: S,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> Result<Self, tegra_swizzle::SwizzleError> {
         create_nutexb(image, name)
     }
 
-    /// Creates a [NutexbFile] from `image` with the nutexb string set to `name` without any swizzling.
+    /// Creates a [NutexbFile] from `surface` with the nutexb string set to `name` without any swizzling.
     /// This assumes no layers or mipmaps for `image`.
-    /// Prefer [NutexbFile::create] for better memory access performance in most cases.
+    /// Prefer [NutexbFile::from_surface] for better memory access performance in most cases.
     ///
-    /// Textures created with [NutexbFile::create] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
+    /// Textures created with [NutexbFile::from_surface] use a memory layout optimized for the Tegra X1 with better access performance in the general case.
     /// This function exists for the rare case where swizzling the image data is not desired for performance or compatibility reasons.
-    pub fn create_unswizzled<N: ToNutexb, S: Into<String>>(
-        image: &N,
+    pub fn from_surface_unswizzled<T: AsRef<[u8]>, S: Into<String>>(
+        surface: &Surface<T>,
         name: S,
-    ) -> Result<Self, Box<dyn Error>> {
-        create_nutexb_unswizzled(image, name)
+    ) -> Self {
+        create_nutexb_unswizzled(surface, name)
+    }
+
+    #[cfg(feature = "ddsfile")]
+    /// Creates a swizzled [NutexbFile] from `dds` with the Nutexb string set to `name`.
+    ///
+    /// DDS supports all Nutexb image formats as well as array layers, mipmaps, cube maps, and 3D volume textures.
+    pub fn from_dds<S: Into<String>>(dds: &ddsfile::Dds, name: S) -> Result<Self, Box<dyn Error>> {
+        // TODO: Return a specific error type.
+        let surface = dds::create_surface(dds)?;
+        Self::from_surface(surface, name).map_err(Into::into)
+    }
+
+    /// Deswizzle the surface data to DDS while preserving the layers, mipmaps, and image format.
+    #[cfg(feature = "ddsfile")]
+    pub fn to_dds(&self) -> Result<ddsfile::Dds, tegra_swizzle::SwizzleError> {
+        dds::create_dds(&self)
+    }
+
+    #[cfg(feature = "image")]
+    /// Creates a swizzled 2D [NutexbFile] from `image` with the Nutexb string set to `name` and without mipmaps.
+    pub fn from_image<S: Into<String>>(
+        image: &image::RgbaImage,
+        name: S,
+    ) -> Result<Self, tegra_swizzle::SwizzleError> {
+        let surface = Surface {
+            width: image.width(),
+            height: image.height(),
+            depth: 1, // No depth for a 2d image
+            image_data: image.as_raw(),
+            mipmap_count: 1,
+            layer_count: 1,
+            image_format: NutexbFormat::R8G8B8A8Srgb,
+        };
+        Self::from_surface(surface, name)
     }
 
     /// Resizes the image data to the expected size based on the [footer](#structfield.footer) information by truncating or padding with zeros.
     ///
-    /// Calling this method is unnecessary for nutexbs created with [NutexbFile::create] or [NutexbFile::create_unswizzled].
+    /// Calling this method is unnecessary for nutexbs created with [NutexbFile::from_surface] or [NutexbFile::from_surface_unswizzled].
     /// These methods already calculate the appropriate image data size.
     pub fn optimize_size(&mut self) {
         let new_len = if self.footer.unk3 == 0x1000 {
