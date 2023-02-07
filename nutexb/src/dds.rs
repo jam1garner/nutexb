@@ -1,7 +1,4 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    error::Error,
-};
+use std::{error::Error, fmt::Display};
 
 use ddsfile::{
     AlphaMode, Caps2, D3D10ResourceDimension, D3DFormat, Dds, DxgiFormat, FourCC, NewDxgiParams,
@@ -9,7 +6,34 @@ use ddsfile::{
 
 use crate::{NutexbFile, NutexbFormat, Surface};
 
-pub fn create_surface(dds: &Dds) -> Result<Surface<&[u8]>, Box<dyn Error>> {
+/// Errors while creating a nutexb file from a DDS file.
+#[derive(Debug)]
+pub enum ReadDdsError {
+    /// The DDS format is not a recognized or supported nutexb format.
+    UnrecognizedFormat,
+    /// The DDS data could not be swizzled.
+    /// This usually means the DDS header does not accurately describe the image data.
+    SwizzleError(tegra_swizzle::SwizzleError),
+}
+
+impl Display for ReadDdsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadDdsError::UnrecognizedFormat => write!(f, "unrecognized DDS format"),
+            ReadDdsError::SwizzleError(e) => write!(f, "failed to swizzle surface: {e}"),
+        }
+    }
+}
+
+impl From<tegra_swizzle::SwizzleError> for ReadDdsError {
+    fn from(value: tegra_swizzle::SwizzleError) -> Self {
+        Self::SwizzleError(value)
+    }
+}
+
+impl Error for ReadDdsError {}
+
+pub fn create_surface(dds: &Dds) -> Result<Surface<&[u8]>, ReadDdsError> {
     Ok(Surface {
         width: dds.get_width(),
         height: dds.get_height(),
@@ -17,7 +41,7 @@ pub fn create_surface(dds: &Dds) -> Result<Surface<&[u8]>, Box<dyn Error>> {
         image_data: &dds.data,
         mipmap_count: dds.get_num_mipmap_levels(),
         layer_count: layer_count(dds),
-        image_format: image_format(dds)?,
+        image_format: dds_image_format(dds).ok_or(ReadDdsError::UnrecognizedFormat)?,
     })
 }
 
@@ -31,128 +55,95 @@ fn layer_count(dds: &Dds) -> u32 {
     }
 }
 
-fn image_format(dds: &Dds) -> Result<NutexbFormat, Box<dyn Error>> {
+fn dds_image_format(dds: &Dds) -> Option<NutexbFormat> {
     // The format can be DXGI, D3D, or specified in the FOURCC.
-    // Checking FOURCC is necessary for compatibility with some applications.
-    dds.get_dxgi_format()
-        .ok_or_else(|| "Missing DXGI format.".to_owned())
-        .and_then(|dxgi| dxgi.try_into())
-        .or_else(|_| {
-            dds.get_d3d_format()
-                .ok_or_else(|| "Missing D3D format.".to_owned())
-                .and_then(|d3d| d3d.try_into())
-        })
-        .or_else(|_| {
-            dds.header
-                .spf
-                .fourcc
-                .as_ref()
-                .ok_or_else(|| "Missing FOURCC.".to_owned())
-                .and_then(|fourcc| fourcc.clone().try_into())
-        })
-        .map_err(Into::into)
+    let dxgi = dds.get_dxgi_format();
+    let d3d = dds.get_d3d_format();
+    let fourcc = dds.header.spf.fourcc.as_ref();
+
+    dxgi.and_then(image_format_from_dxgi)
+        .or_else(|| d3d.and_then(image_format_from_d3d))
+        .or_else(|| fourcc.and_then(image_format_from_fourcc))
 }
 
-impl TryFrom<DxgiFormat> for NutexbFormat {
-    type Error = String;
-
-    fn try_from(value: DxgiFormat) -> Result<Self, Self::Error> {
-        // DXGI DDS supports all the known nutexb formats.
-        match value {
-            DxgiFormat::R8_UNorm => Ok(NutexbFormat::R8Unorm),
-            DxgiFormat::R8G8B8A8_UNorm => Ok(NutexbFormat::R8G8B8A8Unorm),
-            DxgiFormat::R8G8B8A8_UNorm_sRGB => Ok(NutexbFormat::R8G8B8A8Srgb),
-            DxgiFormat::R32G32B32A32_Float => Ok(NutexbFormat::R32G32B32A32Float),
-            DxgiFormat::B8G8R8A8_UNorm => Ok(NutexbFormat::B8G8R8A8Unorm),
-            DxgiFormat::B8G8R8A8_UNorm_sRGB => Ok(NutexbFormat::B8G8R8A8Srgb),
-            DxgiFormat::BC1_UNorm => Ok(NutexbFormat::BC1Unorm),
-            DxgiFormat::BC1_UNorm_sRGB => Ok(NutexbFormat::BC1Srgb),
-            DxgiFormat::BC2_UNorm => Ok(NutexbFormat::BC2Unorm),
-            DxgiFormat::BC2_UNorm_sRGB => Ok(NutexbFormat::BC2Srgb),
-            DxgiFormat::BC3_UNorm => Ok(NutexbFormat::BC3Unorm),
-            DxgiFormat::BC3_UNorm_sRGB => Ok(NutexbFormat::BC3Srgb),
-            DxgiFormat::BC4_UNorm => Ok(NutexbFormat::BC4Unorm),
-            DxgiFormat::BC4_SNorm => Ok(NutexbFormat::BC4Snorm),
-            DxgiFormat::BC5_UNorm => Ok(NutexbFormat::BC5Unorm),
-            DxgiFormat::BC5_SNorm => Ok(NutexbFormat::BC5Snorm),
-            DxgiFormat::BC6H_UF16 => Ok(NutexbFormat::BC6Ufloat),
-            DxgiFormat::BC6H_SF16 => Ok(NutexbFormat::BC6Sfloat),
-            DxgiFormat::BC7_UNorm => Ok(NutexbFormat::BC7Unorm),
-            DxgiFormat::BC7_UNorm_sRGB => Ok(NutexbFormat::BC7Srgb),
-            _ => Err(format!(
-                "DDS DXGI format {:?} does not have a corresponding Nutexb format.",
-                value
-            )),
-        }
+fn image_format_from_dxgi(format: DxgiFormat) -> Option<NutexbFormat> {
+    match format {
+        DxgiFormat::R8_UNorm => Some(NutexbFormat::R8Unorm),
+        DxgiFormat::R8G8B8A8_UNorm => Some(NutexbFormat::R8G8B8A8Unorm),
+        DxgiFormat::R8G8B8A8_UNorm_sRGB => Some(NutexbFormat::R8G8B8A8Srgb),
+        DxgiFormat::R32G32B32A32_Float => Some(NutexbFormat::R32G32B32A32Float),
+        DxgiFormat::B8G8R8A8_UNorm => Some(NutexbFormat::B8G8R8A8Unorm),
+        DxgiFormat::B8G8R8A8_UNorm_sRGB => Some(NutexbFormat::B8G8R8A8Srgb),
+        DxgiFormat::BC1_UNorm => Some(NutexbFormat::BC1Unorm),
+        DxgiFormat::BC1_UNorm_sRGB => Some(NutexbFormat::BC1Srgb),
+        DxgiFormat::BC2_UNorm => Some(NutexbFormat::BC2Unorm),
+        DxgiFormat::BC2_UNorm_sRGB => Some(NutexbFormat::BC2Srgb),
+        DxgiFormat::BC3_UNorm => Some(NutexbFormat::BC3Unorm),
+        DxgiFormat::BC3_UNorm_sRGB => Some(NutexbFormat::BC3Srgb),
+        DxgiFormat::BC4_UNorm => Some(NutexbFormat::BC4Unorm),
+        DxgiFormat::BC4_SNorm => Some(NutexbFormat::BC4Snorm),
+        DxgiFormat::BC5_UNorm => Some(NutexbFormat::BC5Unorm),
+        DxgiFormat::BC5_SNorm => Some(NutexbFormat::BC5Snorm),
+        DxgiFormat::BC6H_SF16 => Some(NutexbFormat::BC6Sfloat),
+        DxgiFormat::BC6H_UF16 => Some(NutexbFormat::BC6Ufloat),
+        DxgiFormat::BC7_UNorm => Some(NutexbFormat::BC7Unorm),
+        DxgiFormat::BC7_UNorm_sRGB => Some(NutexbFormat::BC7Srgb),
+        _ => None,
     }
 }
 
-impl TryFrom<D3DFormat> for NutexbFormat {
-    type Error = String;
-
-    fn try_from(value: D3DFormat) -> Result<Self, Self::Error> {
-        match value {
-            D3DFormat::DXT1 => Ok(Self::BC1Unorm),
-            D3DFormat::DXT2 => Ok(Self::BC2Unorm),
-            D3DFormat::DXT3 => Ok(Self::BC2Unorm),
-            D3DFormat::DXT4 => Ok(Self::BC3Unorm),
-            D3DFormat::DXT5 => Ok(Self::BC3Unorm),
-            _ => Err(format!(
-                "DDS D3D format {:?} does not have a corresponding Nutexb format.",
-                value
-            )),
-        }
+fn image_format_from_d3d(format: D3DFormat) -> Option<NutexbFormat> {
+    match format {
+        D3DFormat::DXT1 => Some(NutexbFormat::BC1Unorm),
+        D3DFormat::DXT2 => Some(NutexbFormat::BC2Unorm),
+        D3DFormat::DXT3 => Some(NutexbFormat::BC2Unorm),
+        D3DFormat::DXT4 => Some(NutexbFormat::BC3Unorm),
+        D3DFormat::DXT5 => Some(NutexbFormat::BC3Unorm),
+        _ => None,
     }
 }
 
 const BC5U: u32 = u32::from_le_bytes(*b"BC5U");
 const ATI2: u32 = u32::from_le_bytes(*b"ATI2");
 
-impl TryFrom<FourCC> for NutexbFormat {
-    type Error = String;
-
-    fn try_from(fourcc: FourCC) -> Result<Self, Self::Error> {
-        match fourcc.0 {
-            FourCC::DXT1 => Ok(Self::BC1Unorm),
-            FourCC::DXT2 => Ok(Self::BC2Unorm),
-            FourCC::DXT3 => Ok(Self::BC2Unorm),
-            FourCC::DXT4 => Ok(Self::BC3Unorm),
-            FourCC::DXT5 => Ok(Self::BC3Unorm),
-            FourCC::BC4_UNORM => Ok(Self::BC4Unorm),
-            FourCC::BC4_SNORM => Ok(Self::BC4Snorm),
-            ATI2 | BC5U => Ok(Self::BC5Unorm),
-            FourCC::BC5_SNORM => Ok(Self::BC5Snorm),
-            _ => Err(format!(
-                "DDS FOURCC {:x?} does not have a corresponding Nutexb format.",
-                fourcc.0
-            )),
-        }
+fn image_format_from_fourcc(fourcc: &FourCC) -> Option<NutexbFormat> {
+    match fourcc.0 {
+        FourCC::DXT1 => Some(NutexbFormat::BC1Unorm),
+        FourCC::DXT2 => Some(NutexbFormat::BC2Unorm),
+        FourCC::DXT3 => Some(NutexbFormat::BC2Unorm),
+        FourCC::DXT4 => Some(NutexbFormat::BC3Unorm),
+        FourCC::DXT5 => Some(NutexbFormat::BC3Unorm),
+        FourCC::BC4_UNORM => Some(NutexbFormat::BC4Unorm),
+        FourCC::BC4_SNORM => Some(NutexbFormat::BC4Snorm),
+        ATI2 | BC5U => Some(NutexbFormat::BC5Unorm),
+        FourCC::BC5_SNORM => Some(NutexbFormat::BC5Snorm),
+        _ => None,
     }
 }
 
 impl From<NutexbFormat> for DxgiFormat {
-    fn from(format: NutexbFormat) -> Self {
-        match format {
-            NutexbFormat::R8Unorm => DxgiFormat::R8_UNorm,
-            NutexbFormat::R8G8B8A8Unorm => DxgiFormat::R8G8B8A8_UNorm,
-            NutexbFormat::R8G8B8A8Srgb => DxgiFormat::R8G8B8A8_UNorm_sRGB,
-            NutexbFormat::R32G32B32A32Float => DxgiFormat::R32G32B32A32_Float,
-            NutexbFormat::B8G8R8A8Unorm => DxgiFormat::B8G8R8A8_UNorm,
-            NutexbFormat::B8G8R8A8Srgb => DxgiFormat::B8G8R8A8_UNorm_sRGB,
-            NutexbFormat::BC1Unorm => DxgiFormat::BC1_UNorm,
-            NutexbFormat::BC1Srgb => DxgiFormat::BC1_UNorm_sRGB,
-            NutexbFormat::BC2Unorm => DxgiFormat::BC2_UNorm,
-            NutexbFormat::BC2Srgb => DxgiFormat::BC2_UNorm_sRGB,
-            NutexbFormat::BC3Unorm => DxgiFormat::BC3_UNorm,
-            NutexbFormat::BC3Srgb => DxgiFormat::BC3_UNorm_sRGB,
-            NutexbFormat::BC4Unorm => DxgiFormat::BC4_UNorm,
-            NutexbFormat::BC4Snorm => DxgiFormat::BC4_SNorm,
-            NutexbFormat::BC5Unorm => DxgiFormat::BC5_UNorm,
-            NutexbFormat::BC5Snorm => DxgiFormat::BC5_SNorm,
-            NutexbFormat::BC6Ufloat => DxgiFormat::BC6H_UF16,
-            NutexbFormat::BC6Sfloat => DxgiFormat::BC6H_SF16,
-            NutexbFormat::BC7Unorm => DxgiFormat::BC7_UNorm,
-            NutexbFormat::BC7Srgb => DxgiFormat::BC7_UNorm_sRGB,
+    fn from(value: NutexbFormat) -> Self {
+        match value {
+            NutexbFormat::BC1Unorm => Self::BC1_UNorm,
+            NutexbFormat::BC1Srgb => Self::BC1_UNorm_sRGB,
+            NutexbFormat::BC2Unorm => Self::BC2_UNorm,
+            NutexbFormat::BC2Srgb => Self::BC2_UNorm_sRGB,
+            NutexbFormat::BC3Unorm => Self::BC3_UNorm,
+            NutexbFormat::BC3Srgb => Self::BC3_UNorm_sRGB,
+            NutexbFormat::BC4Unorm => Self::BC4_UNorm,
+            NutexbFormat::BC4Snorm => Self::BC4_SNorm,
+            NutexbFormat::BC5Unorm => Self::BC5_UNorm,
+            NutexbFormat::BC5Snorm => Self::BC5_SNorm,
+            NutexbFormat::BC6Ufloat => Self::BC6H_UF16,
+            NutexbFormat::BC6Sfloat => Self::BC6H_SF16,
+            NutexbFormat::BC7Unorm => Self::BC7_UNorm,
+            NutexbFormat::BC7Srgb => Self::BC7_UNorm_sRGB,
+            NutexbFormat::R8Unorm => Self::R8_UNorm,
+            NutexbFormat::R8G8B8A8Unorm => Self::R8G8B8A8_UNorm,
+            NutexbFormat::R8G8B8A8Srgb => Self::R8G8B8A8_UNorm_sRGB,
+            NutexbFormat::R32G32B32A32Float => Self::R32G32B32A32_Float,
+            NutexbFormat::B8G8R8A8Unorm => Self::B8G8R8A8_UNorm,
+            NutexbFormat::B8G8R8A8Srgb => Self::B8G8R8A8_UNorm_sRGB,
         }
     }
 }

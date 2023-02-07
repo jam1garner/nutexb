@@ -54,7 +54,6 @@ nutexb.write_to_file("col_001.nutexb")?;
 use binrw::{binrw, prelude::*, NullString, ReadOptions, VecArgs};
 use convert::{create_nutexb, create_nutexb_unswizzled};
 use std::{
-    error::Error,
     io::{Cursor, Read, Seek, SeekFrom, Write},
     num::NonZeroUsize,
     path::Path,
@@ -63,6 +62,9 @@ use tegra_swizzle::surface::{deswizzled_surface_size, swizzled_surface_size, Blo
 
 #[cfg(feature = "ddsfile")]
 pub use ddsfile;
+
+#[cfg(feature = "ddsfile")]
+pub use dds::ReadDdsError;
 
 #[cfg(feature = "ddsfile")]
 mod dds;
@@ -139,9 +141,7 @@ impl NutexbFile {
 
     /// Reads the [NutexbFile] from the specified `path`.
     /// The entire file is buffered to improve performance.
-    pub fn read_from_file<P: AsRef<Path>>(
-        path: P,
-    ) -> Result<NutexbFile, binrw::Error> {
+    pub fn read_from_file<P: AsRef<Path>>(path: P) -> Result<NutexbFile, binrw::Error> {
         let mut file = Cursor::new(std::fs::read(path)?);
         let nutexb = file.read_le::<NutexbFile>()?;
         Ok(nutexb)
@@ -201,8 +201,7 @@ impl NutexbFile {
     /// Creates a swizzled [NutexbFile] from `dds` with the Nutexb string set to `name`.
     ///
     /// DDS supports all Nutexb image formats as well as array layers, mipmaps, cube maps, and 3D volume textures.
-    pub fn from_dds<S: Into<String>>(dds: &ddsfile::Dds, name: S) -> Result<Self, Box<dyn Error>> {
-        // TODO: Return a specific error type.
+    pub fn from_dds<S: Into<String>>(dds: &ddsfile::Dds, name: S) -> Result<Self, ReadDdsError> {
         let surface = dds::create_surface(dds)?;
         Self::from_surface(surface, name).map_err(Into::into)
     }
