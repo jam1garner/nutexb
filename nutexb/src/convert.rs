@@ -80,7 +80,7 @@ pub fn create_nutexb<T: AsRef<[u8]>, S: Into<String>>(
         data,
         layer_mipmaps,
         footer: NutexbFooter {
-            string: NullString::from_string(name.into()),
+            string: NullString::from(name.into()),
             width,
             height,
             depth,
@@ -163,7 +163,7 @@ pub fn create_nutexb_unswizzled<T: AsRef<[u8]>, S: Into<String>>(
         data,
         layer_mipmaps,
         footer: NutexbFooter {
-            string: NullString::from_string(name.into()),
+            string: NullString::from(name.into()),
             width,
             height,
             depth,

@@ -149,14 +149,14 @@ impl NutexbFile {
 
     /// Writes the [NutexbFile] to the specified `writer`.
     pub fn write<W: Write + Seek>(&self, writer: &mut W) -> Result<(), binrw::Error> {
-        self.write_to(writer).map_err(Into::into)
+        self.write_le(writer).map_err(Into::into)
     }
 
     /// Writes the [NutexbFile] to the specified `path`.
     /// The entire file is buffered to improve performance.
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), binrw::Error> {
         let mut writer = Cursor::new(Vec::new());
-        self.write_to(&mut writer)?;
+        self.write(&mut writer)?;
         std::fs::write(path, writer.into_inner()).map_err(Into::into)
     }
 

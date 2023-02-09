@@ -151,6 +151,7 @@ impl From<NutexbFormat> for DxgiFormat {
 pub fn create_dds(nutexb: &NutexbFile) -> Result<Dds, tegra_swizzle::SwizzleError> {
     let some_if_above_one = |x| if x > 0 { Some(x) } else { None };
 
+    // TODO: Avoid unwrap.
     let mut dds = Dds::new_dxgi(NewDxgiParams {
         height: nutexb.footer.height,
         width: nutexb.footer.width,
