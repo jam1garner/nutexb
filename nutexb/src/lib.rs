@@ -51,7 +51,7 @@ nutexb.write_to_file("col_001.nutexb")?;
 # Ok(()) }
 ```
  */
-use binrw::{binrw, prelude::*, NullString, ReadOptions, VecArgs};
+use binrw::{binrw, prelude::*, NullString, Endian, VecArgs};
 use convert::{create_nutexb, create_nutexb_unswizzled};
 use std::{
     io::{Cursor, Read, Seek, SeekFrom, Write},
@@ -96,12 +96,12 @@ pub struct NutexbFile {
 
 // Use a custom parser since we don't know the data size until finding the footer.
 impl BinRead for NutexbFile {
-    type Args = ();
+    type Args<'arg> = ();
 
     fn read_options<R: Read + Seek>(
         reader: &mut R,
-        _options: &ReadOptions,
-        _args: Self::Args,
+        _endian: Endian,
+        _args: Self::Args<'_>,
     ) -> BinResult<Self> {
         // We need the footer to know the size of the layer mipmaps.
         reader.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;

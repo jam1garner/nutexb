@@ -1,2 +1,3 @@
 [workspace]
 members = ["nutexb", "nutexb_cli"]
+resolver = "2"

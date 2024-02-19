@@ -2,7 +2,7 @@
 name = "nutexb"
 version = "0.6.0"
 authors = ["jam1garner <8260240+jam1garner@users.noreply.github.com>"]
-edition = "2018"
+edition = "2021"
 description = "Library for working with Smash Ultimate's nutexb texture files"
 license = "MIT"
 repository = "https://github.com/jam1garner/nutexb"
@@ -11,7 +11,7 @@ repository = "https://github.com/jam1garner/nutexb"
 ddsfile = { version = "0.5.1", optional = true }
 image = { version = "0.24.3", optional = true }
 tegra_swizzle = "0.3.0"
-binrw = "0.10.0"
+binrw = "0.13"
 
 [package.metadata.docs.rs]
 all-features = true
