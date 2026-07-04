@@ -51,25 +51,25 @@ pub fn create_nutexb<T: AsRef<[u8]>, S: Into<String>>(
     let layer_count = image.layer_count;
 
     let layer_mipmaps = calculate_layer_mip_sizes(
-        width as usize,
-        height as usize,
-        depth as usize,
+        width,
+        height,
+        depth,
         block_dim,
-        bytes_per_pixel as usize,
-        mip_count as usize,
-        layer_count as usize,
+        bytes_per_pixel,
+        mip_count,
+        layer_count,
     );
 
     let data = tegra_swizzle::surface::swizzle_surface(
-        width as usize,
-        height as usize,
-        depth as usize,
+        width,
+        height,
+        depth,
         image.image_data.as_ref(),
         block_dim,
         None,
-        bytes_per_pixel as usize,
-        mip_count as usize,
-        layer_count as usize,
+        bytes_per_pixel,
+        mip_count,
+        layer_count,
     )?;
 
     let size = data.len() as u32;
@@ -107,13 +107,13 @@ fn unk2(depth: u32, layer_count: u32) -> u32 {
 }
 
 fn calculate_layer_mip_sizes(
-    width: usize,
-    height: usize,
-    depth: usize,
+    width: u32,
+    height: u32,
+    depth: u32,
     block_dim: BlockDim,
-    bytes_per_pixel: usize,
-    mip_count: usize,
-    layer_count: usize,
+    bytes_per_pixel: u32,
+    mip_count: u32,
+    layer_count: u32,
 ) -> Vec<LayerMipmaps> {
     // Mipmaps are repeated for each layer.
     let layer = LayerMipmaps {
@@ -126,11 +126,11 @@ fn calculate_layer_mip_sizes(
                 let mip_height = max(div_round_up(height >> mip, block_dim.height.get()), 1);
                 let mip_depth = max(div_round_up(depth >> mip, block_dim.depth.get()), 1);
 
-                (mip_width * mip_height * mip_depth * bytes_per_pixel) as u32
+                mip_width * mip_height * mip_depth * bytes_per_pixel
             })
             .collect(),
     };
-    vec![layer; layer_count]
+    vec![layer; layer_count as usize]
 }
 
 pub fn create_nutexb_unswizzled<T: AsRef<[u8]>, S: Into<String>>(
@@ -148,15 +148,8 @@ pub fn create_nutexb_unswizzled<T: AsRef<[u8]>, S: Into<String>>(
     let bytes_per_pixel = image_format.bytes_per_pixel();
     let block_dim = image_format.block_dim();
 
-    let layer_mipmaps = calculate_layer_mip_sizes(
-        width as usize,
-        height as usize,
-        depth as usize,
-        block_dim,
-        bytes_per_pixel as usize,
-        1,
-        1,
-    );
+    let layer_mipmaps =
+        calculate_layer_mip_sizes(width, height, depth, block_dim, bytes_per_pixel, 1, 1);
 
     let size = data.len() as u32;
     NutexbFile {

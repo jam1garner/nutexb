@@ -51,11 +51,11 @@ nutexb.write_to_file("col_001.nutexb")?;
 # Ok(()) }
 ```
  */
-use binrw::{binrw, prelude::*, NullString, Endian, VecArgs};
+use binrw::{binrw, prelude::*, Endian, NullString, VecArgs};
 use convert::{create_nutexb, create_nutexb_unswizzled};
 use std::{
     io::{Cursor, Read, Seek, SeekFrom, Write},
-    num::NonZeroUsize,
+    num::NonZeroU32,
     path::Path,
 };
 use tegra_swizzle::surface::{deswizzled_surface_size, swizzled_surface_size, BlockDim};
@@ -163,15 +163,15 @@ impl NutexbFile {
     /// Deswizzles all the layers and mipmaps in [data](#structfield.data).
     pub fn deswizzled_data(&self) -> Result<Vec<u8>, tegra_swizzle::SwizzleError> {
         tegra_swizzle::surface::deswizzle_surface(
-            self.footer.width as usize,
-            self.footer.height as usize,
-            self.footer.depth as usize,
+            self.footer.width,
+            self.footer.height,
+            self.footer.depth,
             &self.data,
             self.footer.image_format.block_dim(),
             None,
-            self.footer.image_format.bytes_per_pixel() as usize,
-            self.footer.mipmap_count as usize,
-            self.footer.layer_count as usize,
+            self.footer.image_format.bytes_per_pixel(),
+            self.footer.mipmap_count,
+            self.footer.layer_count,
         )
     }
 
@@ -237,25 +237,25 @@ impl NutexbFile {
     pub fn optimize_size(&mut self) {
         let new_len = if self.footer.unk3 == 0x1000 {
             swizzled_surface_size(
-                self.footer.width as usize,
-                self.footer.height as usize,
-                self.footer.depth as usize,
+                self.footer.width,
+                self.footer.height,
+                self.footer.depth,
                 self.footer.image_format.block_dim(),
                 None,
-                self.footer.image_format.bytes_per_pixel() as usize,
-                self.footer.mipmap_count as usize,
-                self.footer.layer_count as usize,
+                self.footer.image_format.bytes_per_pixel(),
+                self.footer.mipmap_count,
+                self.footer.layer_count,
             )
         } else {
             // Not all nutexbs store swizzled surfaces.
             deswizzled_surface_size(
-                self.footer.width as usize,
-                self.footer.height as usize,
-                self.footer.depth as usize,
+                self.footer.width,
+                self.footer.height,
+                self.footer.depth,
                 self.footer.image_format.block_dim(),
-                self.footer.image_format.bytes_per_pixel() as usize,
-                self.footer.mipmap_count as usize,
-                self.footer.layer_count as usize,
+                self.footer.image_format.bytes_per_pixel(),
+                self.footer.mipmap_count,
+                self.footer.layer_count,
             )
         };
 
@@ -434,9 +434,9 @@ impl NutexbFormat {
 
     pub(crate) fn block_dim(&self) -> BlockDim {
         BlockDim {
-            width: NonZeroUsize::new(self.block_width() as usize).unwrap(),
-            height: NonZeroUsize::new(self.block_height() as usize).unwrap(),
-            depth: NonZeroUsize::new(self.block_depth() as usize).unwrap(),
+            width: NonZeroU32::new(self.block_width()).unwrap(),
+            height: NonZeroU32::new(self.block_height()).unwrap(),
+            depth: NonZeroU32::new(self.block_depth()).unwrap(),
         }
     }
 }
